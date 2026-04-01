@@ -1,4 +1,4 @@
-const CACHE = 'nexora-pwa-v3';
+const CACHE = 'nexora-pwa-v4';
 const ASSETS = ['/', '/manifest.json', '/icon-192.png', '/icon-512.png',
   '/pwa-screenshot-narrow.png', '/pwa-screenshot-wide.png'];
 
