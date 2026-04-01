@@ -1,4 +1,4 @@
-const CACHE = 'elite-v1';
+const CACHE = 'nexora-pwa-v2';
 const ASSETS = ['/', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', e => {

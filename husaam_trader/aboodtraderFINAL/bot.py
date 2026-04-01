@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 import pydantic, uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 _QX_IMPORT_ERR = None
@@ -2221,8 +2221,9 @@ app = FastAPI(title="NEXORA TRADE", lifespan=_app_lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
                    allow_methods=["*"], allow_headers=["*"])
 
-_fe = os.path.join(os.path.dirname(__file__), "frontend.html")
-_ad = os.path.join(os.path.dirname(__file__), "admin.html")
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+_fe = os.path.join(APP_DIR, "frontend.html")
+_ad = os.path.join(APP_DIR, "admin.html")
 HTML  = open(_fe,encoding="utf-8").read() if os.path.exists(_fe) else "<h1>frontend.html مفقود</h1>"
 ADMIN = open(_ad,encoding="utf-8").read() if os.path.exists(_ad) else "<h1>admin.html مفقود</h1>"
 
@@ -2232,6 +2233,43 @@ async def ui(): return HTML
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_ui(): return ADMIN
+
+
+@app.get("/manifest.json")
+async def pwa_manifest():
+    p = os.path.join(APP_DIR, "manifest.json")
+    if not os.path.isfile(p):
+        raise HTTPException(404, "manifest.json مفقود")
+    return FileResponse(p, media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+async def pwa_service_worker():
+    p = os.path.join(APP_DIR, "sw.js")
+    if not os.path.isfile(p):
+        raise HTTPException(404, "sw.js مفقود")
+    return FileResponse(
+        p,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+def _icon_response(name: str) -> FileResponse:
+    p = os.path.join(APP_DIR, name)
+    if not os.path.isfile(p):
+        raise HTTPException(404, f"{name} مفقود")
+    return FileResponse(p, media_type="image/png")
+
+
+@app.get("/icon-192.png")
+async def pwa_icon_192():
+    return _icon_response("icon-192.png")
+
+
+@app.get("/icon-512.png")
+async def pwa_icon_512():
+    return _icon_response("icon-512.png")
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
 @app.post("/api/admin/login")
