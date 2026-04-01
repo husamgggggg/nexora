@@ -2240,7 +2240,11 @@ async def pwa_manifest():
     p = os.path.join(APP_DIR, "manifest.json")
     if not os.path.isfile(p):
         raise HTTPException(404, "manifest.json مفقود")
-    return FileResponse(p, media_type="application/manifest+json")
+    return FileResponse(
+        p,
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "public, max-age=300, must-revalidate"},
+    )
 
 
 @app.get("/sw.js")
@@ -2259,7 +2263,11 @@ def _icon_response(name: str) -> FileResponse:
     p = os.path.join(APP_DIR, name)
     if not os.path.isfile(p):
         raise HTTPException(404, f"{name} مفقود")
-    return FileResponse(p, media_type="image/png")
+    return FileResponse(
+        p,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=3600, must-revalidate"},
+    )
 
 
 @app.get("/icon-192.png")
