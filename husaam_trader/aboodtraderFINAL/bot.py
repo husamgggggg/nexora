@@ -2271,6 +2271,16 @@ async def pwa_icon_192():
 async def pwa_icon_512():
     return _icon_response("icon-512.png")
 
+
+@app.get("/pwa-screenshot-narrow.png")
+async def pwa_screenshot_narrow():
+    return _icon_response("pwa-screenshot-narrow.png")
+
+
+@app.get("/pwa-screenshot-wide.png")
+async def pwa_screenshot_wide():
+    return _icon_response("pwa-screenshot-wide.png")
+
 # ── Admin ─────────────────────────────────────────────────────────────────────
 @app.post("/api/admin/login")
 async def admin_login(req: AdminLoginReq):

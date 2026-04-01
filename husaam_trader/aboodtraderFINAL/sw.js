@@ -1,5 +1,6 @@
-const CACHE = 'nexora-pwa-v2';
-const ASSETS = ['/', '/manifest.json', '/icon-192.png', '/icon-512.png'];
+const CACHE = 'nexora-pwa-v3';
+const ASSETS = ['/', '/manifest.json', '/icon-192.png', '/icon-512.png',
+  '/pwa-screenshot-narrow.png', '/pwa-screenshot-wide.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
