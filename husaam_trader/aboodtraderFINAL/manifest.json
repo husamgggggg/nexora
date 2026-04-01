@@ -9,27 +9,37 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#06080f",
   "theme_color": "#06080f",
   "orientation": "portrait",
   "lang": "ar",
   "dir": "rtl",
   "icons": [
-    {"src": "https://nexora-investment.com/icon-512.png?v=8", "sizes": "512x512", "type": "image/png", "purpose": "any"},
-    {"src": "https://nexora-investment.com/icon-512.png?v=8", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
-    {"src": "https://nexora-investment.com/icon-192.png?v=8", "sizes": "192x192", "type": "image/png", "purpose": "any"},
-    {"src": "https://nexora-investment.com/icon-192.png?v=8", "sizes": "192x192", "type": "image/png", "purpose": "maskable"}
+    {"src": "https://nexora-investment.com/pwa/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "https://nexora-investment.com/pwa/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    {"src": "https://nexora-investment.com/pwa/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "https://nexora-investment.com/pwa/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable"}
+  ],
+  "shortcuts": [
+    {
+      "name": "NEXORA TRADE",
+      "short_name": "NEXORA",
+      "description": "فتح المنصة",
+      "url": "/",
+      "icons": [{"src": "https://nexora-investment.com/pwa/icon-192.png", "sizes": "192x192", "type": "image/png"}]
+    }
   ],
   "screenshots": [
     {
-      "src": "https://nexora-investment.com/pwa-screenshot-narrow.png?v=8",
+      "src": "https://nexora-investment.com/pwa/screenshot-narrow.png",
       "type": "image/png",
       "sizes": "540x720",
       "form_factor": "narrow",
       "label": "NEXORA TRADE — الهاتف"
     },
     {
-      "src": "https://nexora-investment.com/pwa-screenshot-wide.png?v=8",
+      "src": "https://nexora-investment.com/pwa/screenshot-wide.png",
       "type": "image/png",
       "sizes": "1280x720",
       "form_factor": "wide",

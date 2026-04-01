@@ -2280,6 +2280,27 @@ async def pwa_icon_512():
     return _icon_response("icon-512.png")
 
 
+@app.get("/pwa/icon-192.png")
+async def pwa_public_icon_192():
+    """مسار ثابت للـ PWA/APK — يُفضّل في manifest لتوافق PWABuilder والكاش."""
+    return _icon_response("icon-192.png")
+
+
+@app.get("/pwa/icon-512.png")
+async def pwa_public_icon_512():
+    return _icon_response("icon-512.png")
+
+
+@app.get("/pwa/screenshot-narrow.png")
+async def pwa_public_shot_narrow():
+    return _icon_response("pwa-screenshot-narrow.png")
+
+
+@app.get("/pwa/screenshot-wide.png")
+async def pwa_public_shot_wide():
+    return _icon_response("pwa-screenshot-wide.png")
+
+
 @app.get("/pwa-screenshot-narrow.png")
 async def pwa_screenshot_narrow():
     return _icon_response("pwa-screenshot-narrow.png")
