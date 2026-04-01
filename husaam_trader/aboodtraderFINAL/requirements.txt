@@ -1,4 +1,5 @@
 fastapi
 uvicorn
 pydantic
-pyquotex
+numpy
+pyquotex @ git+https://github.com/cleitonleonel/pyquotex.git

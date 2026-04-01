@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Husaam Trader Bot — النسخة النهائية الكاملة
+NEXORA TRADE Bot — النسخة النهائية الكاملة
 ✅ صفقة 60 ثانية ثابتة بدون marginal
 ✅ تحليل شمعات حقيقية من أسعار Quotex الحية
 ✅ حساب ربح/خسارة من رصيد المنصة الفعلي
@@ -8,21 +8,27 @@ Husaam Trader Bot — النسخة النهائية الكاملة
 ✅ متعدد المشتركين كل بحسابه المستقل
 ✅ إشعار عند تحقق الهدف
 """
-import asyncio, json, logging, os, queue, random, re
+import asyncio, html, json, logging, os, queue, random, re
 import secrets, threading, time, traceback
+from contextlib import asynccontextmanager
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 
 import pydantic, uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+_QX_IMPORT_ERR = None
 try:
     from pyquotex.stable_api import Quotex
     QX = True
-except ImportError:
+except ImportError as e:
+    Quotex = None  # type: ignore[misc, assignment]
     QX = False
+    _QX_IMPORT_ERR = e
 
 # تشخيص آخر جلب شموع / WebSocket (للوج)
 _HUSAAM_WS_LAST: dict = {}
@@ -125,8 +131,10 @@ logging.basicConfig(
         logging.FileHandler("logs/bot.log", encoding="utf-8"),
     ],
 )
-log = logging.getLogger("HusaamTrader")
+log = logging.getLogger("NexoraTrade")
 
+if _QX_IMPORT_ERR is not None:
+    log.warning("pyquotex غير محمّل — وضع محاكاة. السبب: %s", _QX_IMPORT_ERR)
 
 def _configure_quiet_loggers():
     """يخفي سجل وصول Uvicorn وضجيج websocket (Sending ping) عند أي طريقة تشغيل."""
@@ -202,6 +210,45 @@ def _persist_admin_token(t: str):
 _load_admin_tokens_into_set()
 
 def save_users(): save(USERS_F, USERS)
+
+
+def _user_display_id(email: str) -> int:
+    """نفس معرّف العرض في /api/status."""
+    if not email:
+        return 0
+    return abs(hash(email)) % 90_000_000 + 10_000_000
+
+
+def _notify_telegram_new_registration(email: str, name: str, registered_at: str) -> None:
+    """يرسل إلى قناة تيليجرام عند طلب انضمام جديد. يتطلب TELEGRAM_BOT_TOKEN و TELEGRAM_CHANNEL_ID."""
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    channel_id = os.getenv("TELEGRAM_CHANNEL_ID", "").strip()
+    if not bot_token or not channel_id:
+        return
+    try:
+        uid = _user_display_id(email)
+        text = (
+            "🔔 <b>طلب انضمام جديد — NEXORA</b>\n\n"
+            f"📧 <b>البريد:</b> {html.escape(email)}\n"
+            f"👤 <b>الاسم:</b> {html.escape(name or '—')}\n"
+            f"🆔 <b>معرف الحساب:</b> <code>{uid}</code>\n"
+            f"🕐 <b>وقت الطلب:</b> {html.escape(registered_at)}"
+        )
+        data = urllib.parse.urlencode(
+            {"chat_id": channel_id, "text": text, "parse_mode": "HTML"}
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            data=data,
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded; charset=utf-8"},
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            if resp.status != 200:
+                log.warning("Telegram: HTTP %s", resp.status)
+    except Exception as e:
+        log.warning("فشل إشعار تيليجرام: %s", e)
+
 
 # ── PIN ────────────────────────────────────────────────────────────────────────
 _pin_queues: dict = {}
@@ -307,7 +354,6 @@ class BotReq(BaseModel):
     account_type: str
     profit_limit: float
     stop_loss: float
-    double_on_loss: bool = False
     token: str
 
 class TokenReq(BaseModel):
@@ -437,7 +483,7 @@ def calc_williams(closes, period=14):
     if high == low: return -50.0
     return round((high-closes[-1])/(high-low)*-100, 2)
 
-# ── استراتيجية حسام EMA10 (شموع مغلقة 1m فقط، EMA10):
+# ── استراتيجية NEXORA EMA10 (شموع مغلقة 1m فقط، EMA10):
 #    CALL (ترند صاعد): سياق فوق EMA → حمراء إشارية على EMA → خضراء تأكيد → CALL
 #    PUT  (ترند هابط): سياق تحت EMA → خضراء إشارية على EMA → حمراء تأكيد → PUT
 _HUSAAM_EMA10_PERIOD = 10
@@ -463,7 +509,7 @@ _HUSAAM_QUOTEX_CACHE_SEC = 90.0
 # مهلة run_async_for لجلب الشموع (بعد v2 قصير + get_candles قصير لكل دورة)
 _HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC = 55.0
 
-# ── استراتيجية حسام الخاصة (MACD + هستوغرام، شموع 1m مغلقة) ──
+# ── استراتيجية NEXORA الخاصة (MACD + هستوغرام، شموع 1m مغلقة) ──
 _HUSAAM_PRIVATE_MIN_BARS = 55
 _HUSAAM_PRIVATE_TREND_EMA = 21
 _HUSAAM_PRIVATE_SCORE = 10
@@ -570,7 +616,7 @@ def _analyze_husaam_strict(candles) -> str:
         macd_line, signal_line, hist, n
     ):
         log.info(
-            "🏆 HUSAAM CALL | RSI=%s MACD confirm | range=%.6f med=%.6f (min=%.6f)",
+            "🏆 NEXORA CALL | RSI=%s MACD confirm | range=%.6f med=%.6f (min=%.6f)",
             rsi,
             last_r,
             med_r,
@@ -581,7 +627,7 @@ def _analyze_husaam_strict(candles) -> str:
         macd_line, signal_line, hist, n
     ):
         log.info(
-            "🏆 HUSAAM PUT | RSI=%s MACD confirm | range=%.6f med=%.6f (min=%.6f)",
+            "🏆 NEXORA PUT | RSI=%s MACD confirm | range=%.6f med=%.6f (min=%.6f)",
             rsi,
             last_r,
             med_r,
@@ -770,7 +816,7 @@ def _analyze_husaam_ema10_signal(candles) -> tuple:
         if _husaam_ema10_reject_flat_or_choppy(closes, p, ent):
             return "wait", 0
         log.debug(
-            "📌 HUSAAM_EMA10 CALL red@sig=%s green@ent=%s ema_sig=%.5f ema_ent=%.5f",
+            "📌 NEXORA_EMA10 CALL red@sig=%s green@ent=%s ema_sig=%.5f ema_ent=%.5f",
             sig,
             ent,
             ema_sig,
@@ -807,7 +853,7 @@ def _analyze_husaam_ema10_signal(candles) -> tuple:
     if _husaam_ema10_reject_flat_or_choppy(closes, p, ent):
         return "wait", 0
     log.debug(
-        "📌 HUSAAM_EMA10 PUT green@sig=%s red@ent=%s ema_sig=%.5f ema_ent=%.5f",
+        "📌 NEXORA_EMA10 PUT green@sig=%s red@ent=%s ema_sig=%.5f ema_ent=%.5f",
         sig,
         ent,
         ema_sig,
@@ -818,7 +864,7 @@ def _analyze_husaam_ema10_signal(candles) -> tuple:
 
 def _analyze_husaam_private_signal(candles) -> tuple:
     """
-    استراتيجية حسام الخاصة — MACD + هستوغرام على شموع 1m مغلقة فقط.
+    استراتيجية NEXORA الخاصة — MACD + هستوغرام على شموع 1m مغلقة فقط.
     هابط: تحت EMA + هستوغرام < 0 + أول شمعة خضراء بالهستوغرام + شمعة سعر خضراء + الخطان فوق الهستو → PUT.
     صاعد: فوق EMA + هستوغرام > 0 + 6 شموع خضراء صاعدة + شمعة سعر حمراء + الخطان تحت الهستو → CALL.
     """
@@ -848,7 +894,7 @@ def _analyze_husaam_private_signal(candles) -> tuple:
                 break
         if ok and macd_line[i] < hist[i] and signal_line[i] < hist[i]:
             log.debug(
-                "📌 HUSAAM_PRIVATE CALL i=%s hist=%.8f macd=%.8f sig=%.8f",
+                "📌 NEXORA_PRIVATE CALL i=%s hist=%.8f macd=%.8f sig=%.8f",
                 i,
                 hist[i],
                 macd_line[i],
@@ -866,7 +912,7 @@ def _analyze_husaam_private_signal(candles) -> tuple:
             and signal_line[i] > hist[i]
         ):
             log.debug(
-                "📌 HUSAAM_PRIVATE PUT i=%s hist=%.8f macd=%.8f sig=%.8f",
+                "📌 NEXORA_PRIVATE PUT i=%s hist=%.8f macd=%.8f sig=%.8f",
                 i,
                 hist[i],
                 macd_line[i],
@@ -979,7 +1025,7 @@ def analyze(candles, strategy) -> str:
         if stoch < 30 and williams < -70: cp += 2
         if stoch > 70 and williams > -30: pp += 2
 
-        log.info(f"🏆 HUSAAM: CALL={cp} PUT={pp} diff={abs(cp-pp)}")
+        log.info(f"🏆 NEXORA: CALL={cp} PUT={pp} diff={abs(cp-pp)}")
         # عتبة 6 نقاط للدخول — توازن بين الدقة والكمية
         if cp >= pp + 6: return "call"
         if pp >= cp + 6: return "put"
@@ -1864,10 +1910,6 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     log.info(f"🏁 رصيد البداية المعتمد: {start_bal}")
 
 
-    pending_double_count = 0
-    pending_double_asset = ""
-    pending_double_dir = "wait"
-
     while not stop.is_set():
         try:
             # ── جمع الأسعار الحية ──────────────────────────────────────────
@@ -1879,19 +1921,10 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             # ── تحليل الشمعات ─────────────────────────────────────────────
             direction = "wait"
             chosen_asset = all_assets[0]
-            forced_double = False
             burst_count = 1
             any_candles = False
 
-            if pending_double_count > 0 and pending_double_asset:
-                forced_double = True
-                direction = pending_double_dir if pending_double_dir in ("call", "put") else S.get("last_signal", "wait")
-                chosen_asset = pending_double_asset
-                burst_count = pending_double_count
-                pending_double_count = 0
-                log.info(f"♻️ مضاعفة: تنفيذ {burst_count} صفقات مباشرة على {chosen_asset} باتجاه {direction.upper()}")
-                S["status_msg"] = "المضاعفة مفعلة: تنفيذ صفقة إضافية بعد خسارة"
-            elif QX and S["logged_in"] and S["client"]:
+            if QX and S["logged_in"] and S["client"]:
                 # جمع أسعار لكل الأزواج
                 for a in all_assets:
                     _collect_price(S["client"], a, S["email"])
@@ -1921,7 +1954,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                             analysis_bars=_HUSAAM_PRIVATE_MIN_BARS,
                         )
                         if _csrc in ("quotex_1m", "quotex_1m_cache"):
-                            ema_src_label = "شموع Quotex 1m — حسام الخاصة"
+                            ema_src_label = "شموع Quotex 1m — NEXORA Private"
                         elif _csrc == "quotex_stale_cache":
                             ema_src_label = "شموع 1m — كاش احتياطي"
                         elif _csrc == "sim_tick_1m":
@@ -2030,12 +2063,8 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             S["last_signal"] = direction
 
             # ── توقيت الإرسال
-            # في وضع المضاعفة بعد الخسارة: تنفيذ فوري (بدون انتظار الدقيقة)
-            if not forced_double:
-                wait_for_minute_start(stop)
-                if stop.is_set(): break
-            else:
-                if stop.is_set(): break
+            wait_for_minute_start(stop)
+            if stop.is_set(): break
 
             log.info(f"🎯 {direction.upper()} | {datetime.now().strftime('%H:%M:%S')}")
 
@@ -2094,7 +2123,6 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
             # ── النتائج لكل صفقة في الـ Burst ─────────────────────────────
             total_prf = 0.0
-            any_loss = False
             for trade, tid in opened_trades:
                 if QX and tid and S["client"]:
                     r2  = run_async_for(S["email"], _check_win(S["client"],tid), 15)
@@ -2106,7 +2134,6 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
                 prf = round(prf,2)
                 total_prf += prf
-                any_loss = any_loss or (not win)
                 trade.update({"status":"win" if win else "loss",
                               "profit":prf,"ended_at":datetime.now().isoformat()})
                 S["trades"].insert(0, dict(trade))
@@ -2114,12 +2141,6 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
                 if win: S["wins"]+=1;   log.info(f"✅ فوز +{prf}")
                 else:   S["losses"]+=1; log.info(f"❌ خسارة {prf}")
-
-            if (len(opened_trades) == 1) and any_loss and req.double_on_loss:
-                pending_double_count = 2
-                pending_double_asset = chosen_asset
-                pending_double_dir = direction
-                log.info(f"🧮 المضاعفة: بعد الخسارة سيتم تنفيذ صفقتين فوراً على {chosen_asset}")
 
             S["current_trade"] = None
 
@@ -2190,14 +2211,15 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 # ══════════════════════════════════════════════════════════════════════════════
 # FastAPI
 # ══════════════════════════════════════════════════════════════════════════════
-app = FastAPI(title="Husaam Trader")
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    _configure_quiet_loggers()
+    yield
+
+
+app = FastAPI(title="NEXORA TRADE", lifespan=_app_lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
                    allow_methods=["*"], allow_headers=["*"])
-
-
-@app.on_event("startup")
-async def _startup_quiet_logs():
-    _configure_quiet_loggers()
 
 _fe = os.path.join(os.path.dirname(__file__), "frontend.html")
 _ad = os.path.join(os.path.dirname(__file__), "admin.html")
@@ -2288,17 +2310,21 @@ async def admin_delete(req: ApproveReq):
 
 # ── User ──────────────────────────────────────────────────────────────────────
 @app.post("/api/register")
-async def register(req: RegisterReq):
+async def register(req: RegisterReq, background_tasks: BackgroundTasks):
     if "@" not in req.email: raise HTTPException(400,"بريد غير صحيح")
     if req.email in USERS:
         s = USERS[req.email]["status"]
         msgs = {"approved":"حسابك مفعّل — سجّل دخولك",
                 "pending":"طلبك قيد المراجعة","rejected":"تم رفض طلبك"}
         return {"success":False,"status":s,"message":msgs.get(s,"")}
+    registered_at = datetime.now().isoformat()
     USERS[req.email] = {"name":req.name,"status":"pending",
-        "registered_at":datetime.now().isoformat(),"session_token":"","approved_at":"","note":""}
+        "registered_at":registered_at,"session_token":"","approved_at":"","note":""}
     save_users()
     log.info(f"📝 طلب: {req.email}")
+    background_tasks.add_task(
+        _notify_telegram_new_registration, req.email, req.name or "", registered_at
+    )
     return {"success":True,"status":"pending","message":"تم إرسال طلبك — انتظر موافقة المسؤول"}
 
 @app.get("/api/check_status")
@@ -2503,11 +2529,13 @@ async def status(token: str=""):
 
 if __name__ == "__main__":
     log.info("ℹ️ للجلسات وPIN: شغّل عملية واحدة فقط (worker واحد) حتى لا تُفقد SESSIONS بين الطلبات")
-    log.info("🚀 Husaam Trader — http://localhost:8000")
+    log.info("🚀 NEXORA TRADE — http://localhost:8000")
     log.info("👤 Admin: http://localhost:8000/admin")
     log.info(f"🌐 CORS origins: {ALLOWED_ORIGINS}")
     log.info(f"📦 pyquotex: {'✅' if QX else '❌ محاكاة'}")
     log.info(f"📦 pydantic : v{pydantic.VERSION}")
+    if os.getenv("TELEGRAM_BOT_TOKEN", "").strip() and os.getenv("TELEGRAM_CHANNEL_ID", "").strip():
+        log.info("📱 تيليجرام: إشعارات طلبات الانضمام → القناة مفعّلة")
     uvicorn.run(
         app,
         host=os.getenv("HOST", "0.0.0.0"),
