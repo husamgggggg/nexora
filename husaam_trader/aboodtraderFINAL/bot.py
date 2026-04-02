@@ -2478,9 +2478,15 @@ async def login(req: LoginReq):
                 "not available in your region",
                 "region",
                 "cloudflare",
+                "websocket",
+                "handshake status 403",
+                "403 forbidden",
             ])
             if blocked_region:
-                raise HTTPException(403, "Quotex غير متاح من السيرفر/المنطقة الحالية. تعذر الدخول الحقيقي.")
+                raise HTTPException(
+                    403,
+                    "Quotex رفض اتصال WebSocket (غالباً حماية Cloudflare أو IP/منطقة). جرّب VPN أو شبكة أخرى، أو تشغيل البوت من مكان يصل فيه المتصفح إلى Quotex.",
+                )
             raise HTTPException(401, msg)
         S["client"]=r["client"]; S["real_balance"]=r["real"]
         S["demo_balance"]=r["demo"]; S["currency"]=r.get("cur","USD")
