@@ -21,6 +21,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
+
+def _load_local_env():
+    """تحميل ``.env`` من مجلد ``bot.py`` قبل قراءة ZENROWS_* وغيرها."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    _base = os.path.dirname(os.path.abspath(__file__))
+    load_dotenv(os.path.join(_base, ".env"))
+
+
+_load_local_env()
+
 _QX_IMPORT_ERR = None
 try:
     from pyquotex.stable_api import Quotex
@@ -143,6 +156,20 @@ def _configure_quiet_loggers():
 
 
 _configure_quiet_loggers()
+
+
+def _init_zenrows_for_pyquotex():
+    """بروكسي pyquotex: ZENROWS_* أو QUOTEX_* أو HTTPS_PROXY — انظر zenrows_pyquotex.py."""
+    try:
+        from zenrows_pyquotex import configure_zenrows_from_environment
+
+        return configure_zenrows_from_environment()
+    except Exception as e:
+        log.warning("تهيئة ZenRows: %s", e)
+        return None
+
+
+QX_HTTP_PROXIES = _init_zenrows_for_pyquotex()
 
 USERS_F  = "data/users.json"
 ADMIN_PW = os.getenv("ADMIN_PW", "Admin@2024")
@@ -1749,7 +1776,12 @@ async def _get_single_balance(client, mode) -> float:
 async def _login_qx(email, password, S):
     try:
         S["login_error"] = ""
-        client = Quotex(email=email, password=password, lang="en")
+        client = Quotex(
+            email=email,
+            password=password,
+            lang="en",
+            proxies=QX_HTTP_PROXIES,
+        )
         S["client"] = client
         import builtins
         orig = builtins.input
