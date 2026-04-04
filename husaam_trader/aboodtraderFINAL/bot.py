@@ -2253,6 +2253,13 @@ app = FastAPI(title="NEXORA TRADE", lifespan=_app_lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
                    allow_methods=["*"], allow_headers=["*"])
 
+if os.getenv("DEBUG_API_LOG", "").strip().lower() in ("1", "true", "yes"):
+    @app.middleware("http")
+    async def _log_api_requests(request, call_next):
+        if request.url.path.startswith("/api"):
+            log.info("➡️ API %s %s", request.method, request.url.path)
+        return await call_next(request)
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 _fe = os.path.join(APP_DIR, "frontend.html")
 _ad = os.path.join(APP_DIR, "admin.html")

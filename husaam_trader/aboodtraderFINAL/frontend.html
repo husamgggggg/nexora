@@ -701,7 +701,25 @@ function renderPairOption(asset){
   const [b,q]=pairFlags(asset);
   return `<div class="oi-row"><div class="oi-main"><span class="oi-check">✓</span></div><div class="oi-main"><span class="oi-name">${pairLabel(asset)}</span><img class="oi-flag" src="https://flagcdn.com/w20/${b}.png" alt="${b}"><img class="oi-flag" src="https://flagcdn.com/w20/${q}.png" alt="${q}"></div></div>`;
 }
-async function api(path,method='GET',body=null){try{const r=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):null});return await r.json();}catch{return null;}}
+async function api(path,method='GET',body=null){
+  const url='/api'+path;
+  try{
+    const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):null});
+    const ct=(r.headers.get('content-type')||'').toLowerCase();
+    if(ct.includes('application/json'))return await r.json();
+    const t=await r.text();
+    try{return JSON.parse(t);}catch{
+      return{
+        success:false,
+        detail:'HTTP '+r.status+': رد ليس JSON. إن كان البوت على سيرفر بعيد لا تستخدم localhost في المتصفح؛ افتح عنوان السيرفر أو أنشئ SSH tunnel. راجع أيضاً أن Nginx يمرّر /api إلى المنفذ 8000',
+        _non_json:true
+      };
+    }
+  }catch(e){
+    console.error('[api]',url,e);
+    return null;
+  }
+}
 async function checkConn(){
   const d=await api('/status?token='+s.token);
   if(d && typeof d.sim_mode==='boolean') s.sim=!!d.sim_mode;
@@ -720,7 +738,7 @@ async function doRegister(){
   const btn=document.getElementById('regBtn');btn.disabled=true;btn.textContent='⏳ جارٍ الإرسال...';
   const d=await api('/register','POST',{email,name});btn.disabled=false;btn.textContent='إرسال الطلب';
   if(!d)return toast('خطأ في الاتصال','er');
-  toast(d.message||(d.success?'تم':'خطأ'),d.success?'ok':'wa');
+  toast(d.message||d.detail||(d.success?'تم':'خطأ'),d.success?'ok':'wa');
   if(d.status==='approved'&&d.session_token){s.token=d.session_token;localStorage.setItem('at_token_'+email,s.token);localStorage.setItem('at_email',email);go('sLogin',-1);}
   else if(d.status==='pending'){document.getElementById('iCheckEmail').value=email;showCheck();}
 }
@@ -730,7 +748,7 @@ async function doCheck(){
   const btn=document.getElementById('checkBtn');btn.disabled=true;btn.textContent='⏳ جارٍ التحقق...';
   const d=await api('/check_status?email='+encodeURIComponent(email));btn.disabled=false;btn.textContent='تحقق الآن';
   if(!d)return toast('خطأ في الاتصال','er');
-  toast(d.message||d.status,d.status==='approved'?'ok':d.status==='rejected'?'er':'wa');
+  toast(d.message||d.detail||d.status,d.status==='approved'?'ok':d.status==='rejected'?'er':'wa');
   if(d.status==='approved'&&d.session_token){s.token=d.session_token;localStorage.setItem('at_token_'+email,s.token);localStorage.setItem('at_email',email);go('sLogin',-1);}
 }
 async function doLogin(){
@@ -739,7 +757,7 @@ async function doLogin(){
   const btn=document.getElementById('lBtn');btn.disabled=true;btn.textContent='⏳ جارٍ الاتصال...';
   const d=await api('/login','POST',{email,password:pw,token:s.token});
   btn.disabled=false;btn.textContent='تسجيل الدخول';
-  if(!d)return toast('تعذر الاتصال بالخادم','er');
+  if(!d)return toast('تعذر الاتصال بالخادم — المتصفح لم يصل إلى /api (تحقق من العنوان: localhost هنا = جهازك وليس السيرفر)','er');
   if(d.needs_pin){
     document.getElementById('loginBox').style.display='none';
     document.getElementById('pinBox').style.display='block';
