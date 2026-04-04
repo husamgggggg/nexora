@@ -1,3 +1,4 @@
+# pyquotex (من Git) يتطلب Python 3.12+ — أنشئ venv بـ: python3.12 -m venv .venv
 fastapi
 uvicorn
 pydantic
