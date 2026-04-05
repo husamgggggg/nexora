@@ -1,0 +1,26 @@
+NEXORA — بناء APK (WebView → عنوان IP بدون دومين)
+==================================================
+
+1) ثبّت Android Studio (أحدث نسخة مستقرة).
+
+2) افتح المجلد: nexora-android-webview
+   File → Open → اختر المجلد.
+
+3) عدّل عنوان الخادم:
+   app/src/main/res/values/strings.xml
+   غيّر YOUR_SERVER_IP إلى IP السيرفر الحقيقي، مثال:
+   http://203.0.113.50:8000/
+
+4) على السيرفر يجب أن يعمل bot.py ويستمع على 0.0.0.0:8000
+   وفتح المنفذ 8000 في الجدار الناري / لوحة الاستضافة.
+
+5) Build → Build Bundle(s) / APK(s) → Build APK(s)
+   أو: ./gradlew assembleDebug   (من جذر nexora-android-webview بعد توليد Gradle Wrapper من Android Studio)
+
+6) ملف APK التجريبي:
+   app/build/outputs/apk/debug/app-debug.apk
+
+ملاحظات:
+- usesCleartextTraffic=true يسمح بـ HTTP (بدون HTTPS) — مناسب للـ IP المباشر.
+- لتغيير العنوان لاحقاً دون إعادة بناء: يمكن لاحقاً استبدال النص بقراءة من ملف إعدادات (غير مطبّق هنا).
+- تثبيت APK من مصدر غير معروف: إعدادات أندرويد → السماح بالتثبيت من هذا المصدر.
