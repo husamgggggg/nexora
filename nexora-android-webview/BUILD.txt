@@ -24,3 +24,26 @@ NEXORA — بناء APK (WebView → عنوان IP بدون دومين)
 - usesCleartextTraffic=true يسمح بـ HTTP (بدون HTTPS) — مناسب للـ IP المباشر.
 - لتغيير العنوان لاحقاً دون إعادة بناء: يمكن لاحقاً استبدال النص بقراءة من ملف إعدادات (غير مطبّق هنا).
 - تثبيت APK من مصدر غير معروف: إعدادات أندرويد → السماح بالتثبيت من هذا المصدر.
+
+--- إذا فشل Sync: Connection reset / تعذر تنزيل Gradle ---
+1) أعد المحاولة من شبكة أخرى أو VPN (أحياناً الحجب يقطع services.gradle.org).
+
+2) احذف المجلدات التالفة ثم File → Sync Project with Gradle Files:
+   C:\Users\<اسمك>\.gradle\wrapper\dists\
+   (احذف مجلدات gradle-8.* التي فيها ملف .part أو ناقصة)
+
+3) تنزيل Gradle يدوياً (بدون الاعتماد على Studio):
+   - من المتصفح افتح:
+     https://services.gradle.org/distributions/gradle-8.6-bin.zip
+     واحفظ الملف.
+   - فك الضغط إلى مجلد ثابت، مثلاً: C:\gradle-8.6
+   - Android Studio: File → Settings → Build, Execution, Deployment → Gradle
+     → Gradle JDK: اتركه كما هو
+     → "Use Gradle from" → Specified location → اختر C:\gradle-8.6
+   - Apply ثم Sync.
+
+4) بروكسي (إن لزم): في gradle.properties أضف (عدّل القيم):
+   systemProp.http.proxyHost=...
+   systemProp.http.proxyPort=8080
+
+5) تأكد أن جدار النار/مضاد الفيروسات لا يمنع java.exe أو studio64.exe.
