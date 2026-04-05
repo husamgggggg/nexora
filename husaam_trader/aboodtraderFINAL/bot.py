@@ -1773,9 +1773,37 @@ async def _get_single_balance(client, mode) -> float:
         return float(await client.get_balance() or 0)
     except: return 0.0
 
+def _invalidate_pyquotex_disk_session(email: str) -> None:
+    """
+    pyquotex يقرأ session.json (في cwd). إن وُجد token قديم/منتهٍ يتخطّى HTTP login
+    فيُرفض WebSocket برسالة authorization/reject → Token rejected.
+    مسح التوكن يفرض authenticate() كاملاً عند كل تسجيل دخول من الواجهة.
+    عطّل بـ QUOTEX_KEEP_DISK_SESSION=1 إن احتجت إعادة استخدام الجلسة المحفوظة.
+    """
+    if os.getenv("QUOTEX_KEEP_DISK_SESSION", "").strip().lower() in ("1", "true", "yes"):
+        return
+    path = os.path.join(os.getcwd(), "session.json")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict) or email not in data:
+            return
+        ent = data.get(email) or {}
+        ua = ent.get("user_agent") if isinstance(ent, dict) else None
+        data[email] = {"cookies": None, "token": None, "user_agent": ua or ""}
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        log.info("🧹 مُسح token/cookies المحفوظة في session.json لهذا البريد — إعادة تسجيل دخول Quotex كاملة")
+    except Exception as e:
+        log.warning("تعذر تحديث session.json: %s", e)
+
+
 async def _login_qx(email, password, S):
     try:
         S["login_error"] = ""
+        _invalidate_pyquotex_disk_session(email)
         client = Quotex(
             email=email,
             password=password,
