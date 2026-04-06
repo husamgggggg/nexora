@@ -1940,11 +1940,17 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
         all_assets.insert(0, req.asset)
     all_assets = list(dict.fromkeys(all_assets))  # إزالة المكررات
     log.info(f"🤖 {S['email']} | {all_assets} | {req.amount} | {req.strategy} | {req.account_type}")
-    # مدة الصفقة: افتراضياً 60 ثانية، ويمكن زيادتها حتى 90 ثانية عبر المتغير.
+    # مدة الصفقة: افتراضياً 60 ثانية. بعض حسابات Quotex ترفض 90s وتسبب timeout.
     trade_duration_sec = int(os.getenv("TRADE_DURATION_SEC", "60") or 60)
-    trade_duration_sec = max(60, min(90, trade_duration_sec))
-    min_entry_window_sec = float(os.getenv("MIN_ENTRY_WINDOW_SEC", "8") or 8)
-    min_entry_window_sec = max(3.0, min(20.0, min_entry_window_sec))
+    if trade_duration_sec not in (60,):
+        log.warning("TRADE_DURATION_SEC=%s غير مدعوم بثبات حالياً — سيتم استخدام 60s", trade_duration_sec)
+    trade_duration_sec = 60
+    # الدخول مسموح فقط ضمن نافذة زمنية محددة قبل إغلاق الصفقة:
+    # افتراضياً بين 59 و 90 ثانية (كما طلبت).
+    entry_window_min_sec = float(os.getenv("ENTRY_WINDOW_MIN_SEC", "59") or 59)
+    entry_window_max_sec = float(os.getenv("ENTRY_WINDOW_MAX_SEC", "90") or 90)
+    if entry_window_max_sec < entry_window_min_sec:
+        entry_window_min_sec, entry_window_max_sec = entry_window_max_sec, entry_window_min_sec
     # منع تكرار نفس الصفقة المتتالية بسرعة
     entry_cooldown_sec = max(30, trade_duration_sec)
 
@@ -2201,12 +2207,21 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     if ts < cutoff:
                         signal_attempted.pop(k, None)
             signal_attempted[signal_key] = int(now_entry)
-            # تحقّق نافذة الدخول المتبقية قبل الإرسال حتى لا يرجع "وقت غير كافي"
+            # تحقّق نافذة الدخول: فقط إذا الوقت المتبقي بين 59 و90 ثانية.
             now_dt = datetime.now()
-            sec_left = 60.0 - (now_dt.second + now_dt.microsecond / 1_000_000)
-            if sec_left < min_entry_window_sec:
-                S["status_msg"] = f"⏸️ تخطّي الإشارة: الوقت المتبقي للدخول غير كافٍ ({sec_left:.1f}s)"
-                log.info("⏸️ skip entry بسبب نافذة وقت غير كافية: left=%.2fs", sec_left)
+            sec_left_this = 60.0 - (now_dt.second + now_dt.microsecond / 1_000_000)
+            # بعض المنصات تنفّذ على الدورة التالية؛ نعتبر نافذة الدورة التالية أيضاً.
+            sec_left_next = sec_left_this + 60.0
+            eff_left = sec_left_this if sec_left_this >= entry_window_min_sec else sec_left_next
+            if not (entry_window_min_sec <= eff_left <= entry_window_max_sec):
+                S["status_msg"] = (
+                    f"⏸️ تخطّي الإشارة: نافذة الدخول خارج المدى "
+                    f"({eff_left:.1f}s، المطلوب {entry_window_min_sec:.0f}-{entry_window_max_sec:.0f}s)"
+                )
+                log.info(
+                    "⏸️ skip entry: left_this=%.2fs left_next=%.2fs eff=%.2fs (required %.0f-%.0fs)",
+                    sec_left_this, sec_left_next, eff_left, entry_window_min_sec, entry_window_max_sec
+                )
                 stop.wait(timeout=1.0)
                 continue
 
@@ -2233,18 +2248,27 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 S["current_trade"] = trade
                 tid = None
                 if QX and S["logged_in"] and S["client"]:
-                    r = run_async_for(
-                        S["email"],
-                        _do_trade(
-                            S["client"],
-                            chosen_asset,
-                            req.amount,
-                            direction,
-                            req.account_type,
-                            trade_duration_sec,
-                        ),
-                        20,
-                    )
+                    try:
+                        r = run_async_for(
+                            S["email"],
+                            _do_trade(
+                                S["client"],
+                                chosen_asset,
+                                req.amount,
+                                direction,
+                                req.account_type,
+                                trade_duration_sec,
+                            ),
+                            25,
+                        )
+                    except TimeoutError:
+                        S["status_msg"] = "⏸️ تعذر تنفيذ الصفقة (مهلة اتصال Quotex) — تخطي الإشارة"
+                        log.warning("⚠️ Timeout أثناء buy — تخطّي الإشارة الحالية")
+                        continue
+                    except Exception as ex:
+                        S["status_msg"] = "⏸️ تعذر تنفيذ الصفقة حالياً — تخطي الإشارة"
+                        log.warning("⚠️ buy failed: %s", ex)
+                        continue
                     if r["ok"]:
                         tid = r.get("id")
                     else:
