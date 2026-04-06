@@ -2163,44 +2163,56 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     log.info(f"🔵 محاكاة {chosen_asset} {direction.upper()} ({i+1}/{max(1, int(burst_count))})")
                 opened_trades.append((trade, tid))
 
-            if stop.is_set():
-                break
             if not opened_trades:
                 S["current_trade"] = None
+                if stop.is_set():
+                    break
                 stop.wait(timeout=2.0)
                 continue
 
             # ── انتظار 60 ثانية كاملة ─────────────────────────────────────
+            # مع صفقات مفتوحة: لا نخرج مبكراً بسبب stop — وإلا تُفتح صفقات على Quotex ولا تُسجَّل في wins/losses
             log.info("⏳ انتظار 60 ثانية...")
-            # جمع أسعار أثناء الانتظار
             trade_end = time.time() + 60
-            while time.time() < trade_end and not stop.is_set():
+            while time.time() < trade_end:
                 if QX and S["client"]:
                     for a in all_assets:
                         _collect_price(S["client"], a, S["email"])
-                stop.wait(timeout=1)
-            if stop.is_set(): break
+                left = trade_end - time.time()
+                if left <= 0:
+                    break
+                stop.wait(timeout=min(1.0, left))
 
             # ── النتائج لكل صفقة في الـ Burst ─────────────────────────────
             total_prf = 0.0
             for trade, tid in opened_trades:
-                if QX and tid and S["client"]:
-                    r2  = run_async_for(S["email"], _check_win(S["client"],tid), 15)
-                    win = r2["win"]
-                    prf = r2["profit"] if win else -(r2.get("profit",0) or req.amount)
-                else:
-                    win = random.random() < 0.58
-                    prf = round(req.amount*0.80,2) if win else -req.amount
+                try:
+                    if QX and tid and S["client"]:
+                        r2 = run_async_for(S["email"], _check_win(S["client"], tid), 25)
+                        win = r2["win"]
+                        prf = r2["profit"] if win else -(r2.get("profit", 0) or req.amount)
+                    else:
+                        win = random.random() < 0.58
+                        prf = round(req.amount * 0.80, 2) if win else -req.amount
+                except Exception as ex:
+                    log.warning("⚠️ تعذر تسوية صفقة (id=%s): %s — تُحتسب خسارة تقريبية", tid, ex)
+                    win = False
+                    prf = -float(req.amount)
 
-                prf = round(prf,2)
+                prf = round(prf, 2)
                 total_prf += prf
-                trade.update({"status":"win" if win else "loss",
-                              "profit":prf,"ended_at":datetime.now().isoformat()})
+                trade.update({"status": "win" if win else "loss",
+                              "profit": prf, "ended_at": datetime.now().isoformat()})
                 S["trades"].insert(0, dict(trade))
-                if len(S["trades"]) > 200: S["trades"].pop()
+                if len(S["trades"]) > 200:
+                    S["trades"].pop()
 
-                if win: S["wins"]+=1;   log.info(f"✅ فوز +{prf}")
-                else:   S["losses"]+=1; log.info(f"❌ خسارة {prf}")
+                if win:
+                    S["wins"] += 1
+                    log.info(f"✅ فوز +{prf}")
+                else:
+                    S["losses"] += 1
+                    log.info(f"❌ خسارة {prf}")
 
             S["current_trade"] = None
 
@@ -2257,6 +2269,10 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 S["status_msg"] = msg
                 S["running"] = False
                 stop.set(); break
+
+            if stop.is_set():
+                log.info("🛑 إيقاف بعد تسوية الصفقات — خروج من حلقة البوت")
+                break
 
             # صفقة كل دقيقة — لا انتظار إضافي
 

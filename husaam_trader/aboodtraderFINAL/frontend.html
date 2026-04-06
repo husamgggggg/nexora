@@ -46,6 +46,14 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .hero{text-align:center;margin-bottom:22px;}
 .hero-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(0,229,160,.08);border:1px solid rgba(0,229,160,.25);border-radius:20px;padding:5px 16px;font-size:10px;color:var(--g);font-weight:700;letter-spacing:1.5px;margin-bottom:16px;text-transform:uppercase;}
 .hero-icon{font-size:52px;margin-bottom:10px;filter:drop-shadow(0 0 20px rgba(0,229,160,.3));}
+.hero-logo-img{
+  width:88px;
+  height:88px;
+  border-radius:22px;
+  object-fit:cover;
+  border:1px solid rgba(159,176,200,.18);
+  box-shadow:0 10px 28px rgba(0,0,0,.35);
+}
 .hero-title{font-size:28px;font-weight:900;color:var(--tx);line-height:1.2;margin-bottom:4px;}
 .hero-title em{font-style:normal;color:var(--tx);}
 .hero-sub{font-size:12px;color:var(--mu3);line-height:1.9;margin-top:6px;}
@@ -70,6 +78,14 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
 .pinbox{text-align:center;padding:6px 0 14px;}
 .pinbox .icon{font-size:40px;margin-bottom:8px;}
+.pin-logo-img{
+  width:70px;
+  height:70px;
+  border-radius:18px;
+  object-fit:cover;
+  border:1px solid rgba(159,176,200,.18);
+  box-shadow:0 8px 20px rgba(0,0,0,.3);
+}
 .elite-banner{background:linear-gradient(135deg,rgba(224,184,64,.1),rgba(224,184,64,.04));border:1px solid rgba(224,184,64,.25);border-radius:16px;padding:14px 18px;margin-bottom:18px;text-align:center;position:relative;overflow:hidden;}
 .elite-banner::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent);}
 .elite-text{font-size:17px;font-weight:900;color:var(--gold);letter-spacing:1px;}
@@ -340,7 +356,7 @@ body{
 .ni.on::before{height:3px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);}
 .hero{margin-bottom:28px;}
 .hero-badge{background:rgba(77,183,255,.08);border:1px solid rgba(77,183,255,.22);color:var(--cyan);letter-spacing:1.2px;padding:7px 16px;}
-.hero-icon{width:74px;height:74px;margin:0 auto 14px;border-radius:20px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,rgba(77,183,255,.18),rgba(34,197,139,.16));border:1px solid rgba(159,176,200,.16);color:var(--tx);font-size:22px;font-weight:900;letter-spacing:1px;filter:none;box-shadow:var(--shadow);}
+.hero-icon{width:88px;height:88px;margin:0 auto 14px;border-radius:22px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;color:var(--tx);font-size:22px;font-weight:900;letter-spacing:1px;filter:none;box-shadow:none;}
 .hero-title{font-size:30px;}
 .hero-title em{color:var(--cyan);}
 .hero-sub{color:var(--mu2);font-size:13px;max-width:320px;margin:8px auto 0;}
@@ -435,8 +451,8 @@ h1{font-size:18px;}
   <div id="regBdg" style="text-align:center;padding-top:16px"></div>
   <div class="hero">
     <div class="hero-badge">منصة تداول احترافية</div>
-    <div class="hero-icon">NT</div>
-    <div class="hero-title">نيكسورا تريد<br><em>NEXORA TRADE</em></div>
+    <div class="hero-icon"><img class="hero-logo-img" src="/pwa/icon-512.png" alt="NEXO TRADE"></div>
+    <div class="hero-title">نيكسو تريد<br><em>NEXO TRADE</em></div>
     <div class="hero-sub">بوت التداول الآلي الذكي على منصة Quotex</div>
   </div>
   <div class="lbox" id="regBox">
@@ -459,8 +475,8 @@ h1{font-size:18px;}
 <!-- ══ LOGIN ══ -->
 <div id="sLogin" class="scr" style="position:relative;z-index:1;justify-content:center;align-items:center;padding:20px 18px;min-height:100dvh;">
   <div class="elite-banner">
-    <div class="elite-text">نيكسورا تريد</div>
-    <div class="elite-sub">NEXORA TRADE — بوت التداول الذكي</div>
+    <div class="elite-text">نيكسو تريد</div>
+    <div class="elite-sub">NEXO TRADE — بوت التداول الذكي</div>
   </div>
   <div id="loginBdg" style="text-align:center;margin-bottom:14px"></div>
   <div class="lbox" id="loginBox">
@@ -472,7 +488,7 @@ h1{font-size:18px;}
     <p class="lnk" onclick="doLogout()">← تسجيل خروج / تغيير الحساب</p>
   </div>
   <div class="lbox" id="pinBox" style="display:none;margin-top:12px">
-    <div class="pinbox"><div class="icon">NT</div><h2>رمز التحقق</h2><p class="sub">أرسل Quotex رمزاً إلى<br><span id="pinEmail" style="color:var(--g);font-weight:700"></span></p></div>
+    <div class="pinbox"><div class="icon"><img class="pin-logo-img" src="/pwa/icon-512.png" alt="NEXO TRADE"></div><h2>رمز التحقق</h2><p class="sub">أرسل Quotex رمزاً إلى<br><span id="pinEmail" style="color:var(--g);font-weight:700"></span></p></div>
     <div class="fg"><label>رمز PIN</label><input type="text" id="iPin" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" placeholder="123456" style="text-align:center;font-size:26px;font-weight:900;letter-spacing:10px"></div>
     <button class="pbtn" id="pinBtn" onclick="doPin()">تأكيد الرمز</button>
     <p class="lnk" onclick="backLogin()">← العودة</p>
