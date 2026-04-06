@@ -258,6 +258,41 @@ def _canon_asset(sym: str) -> str:
     return s
 
 
+def _to_float_or_none(v):
+    try:
+        if v is None or v == "":
+            return None
+        return float(v)
+    except Exception:
+        return None
+
+
+def _asset_is_open(meta) -> bool:
+    """
+    يعتبر الأصل مفتوحاً فقط عند وجود إشارة واضحة:
+    - open/is_open/enabled = true
+    - أو payout/profit/payment_rate > 0
+    """
+    if isinstance(meta, bool):
+        return bool(meta)
+    if isinstance(meta, (int, float)):
+        return float(meta) > 0
+    if not isinstance(meta, dict):
+        return False
+    flag = meta.get("open", meta.get("is_open", meta.get("enabled", None)))
+    if isinstance(flag, str):
+        flag = flag.strip().lower() in ("1", "true", "yes", "on", "open")
+    if flag is True:
+        return True
+    payout = (
+        _to_float_or_none(meta.get("profit"))
+        or _to_float_or_none(meta.get("payout"))
+        or _to_float_or_none(meta.get("payment_rate"))
+        or _to_float_or_none(meta.get("profit_rate"))
+    )
+    return bool(payout and payout > 0)
+
+
 def _extract_open_assets_from_obj(obj, out: set) -> None:
     if obj is None:
         return
@@ -272,16 +307,8 @@ def _extract_open_assets_from_obj(obj, out: set) -> None:
                 kk = _canon_asset(k)
                 ku = kk.upper().replace("_otc", "_OTC")
                 if _ASSET_RX.match(ku):
-                    if isinstance(v, bool):
-                        if v:
-                            out.add(kk)
-                        continue
-                    if isinstance(v, dict):
-                        is_open = v.get("open", v.get("is_open", v.get("enabled", True)))
-                        if bool(is_open):
-                            out.add(kk)
-                        continue
-                    out.add(kk)
+                    if _asset_is_open(v):
+                        out.add(kk)
         # حالة 2: عناصر بشكل list/dict داخل قيمة
         for v in obj.values():
             if isinstance(v, (list, tuple, dict)):
@@ -292,8 +319,7 @@ def _extract_open_assets_from_obj(obj, out: set) -> None:
             nn = _canon_asset(name)
             nu = nn.upper().replace("_otc", "_OTC")
             if _ASSET_RX.match(nu):
-                is_open = obj.get("open", obj.get("is_open", obj.get("enabled", True)))
-                if bool(is_open):
+                if _asset_is_open(obj):
                     out.add(nn)
 
 
@@ -322,18 +348,6 @@ async def _get_open_assets_async(client) -> set:
         pass
     for c in candidates:
         _extract_open_assets_from_obj(c, out)
-    # fallback: إن لم تتوفر حالة open/close، استخدم مفاتيح codes_asset المتاحة
-    if not out:
-        try:
-            codes = getattr(api, "codes_asset", None) if api is not None else getattr(client, "codes_asset", None)
-            if isinstance(codes, dict):
-                for k in codes.keys():
-                    kk = _canon_asset(k)
-                    ku = kk.upper().replace("_otc", "_OTC")
-                    if _ASSET_RX.match(ku):
-                        out.add(kk)
-        except Exception:
-            pass
     return out
 
 
@@ -2906,12 +2920,14 @@ async def api_assets(token: str = ""):
     """
     S = get_session(token) if token else None
     assets = set()
-    source = "default"
+    source = "quotex_open_assets"
     if S and S.get("logged_in") and S.get("client"):
         assets = _get_open_assets_now(S)
-        if assets:
-            source = "quotex_open_assets"
-    if not assets:
+        if not assets:
+            source = "quotex_open_assets_empty"
+    else:
+        # قبل تسجيل الدخول نعرض قائمة افتراضية فقط لسهولة اختيار مبدئي
+        source = "default_prelogin"
         assets = set(DEFAULT_ASSETS_OTC + DEFAULT_ASSETS_LIVE)
     otc = sorted([a for a in assets if str(a).endswith("_otc")])
     live = sorted([a for a in assets if not str(a).endswith("_otc")])
