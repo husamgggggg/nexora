@@ -1884,6 +1884,21 @@ async def _do_trade(client, asset, amount, direction, acc, duration_sec=60):
         log.error(traceback.format_exc())
         return {"ok":False,"msg":str(e)}
 
+
+def _is_time_insufficient_msg(msg: str) -> bool:
+    m = str(msg or "").lower()
+    return any(
+        x in m
+        for x in (
+            "insufficient",
+            "not enough time",
+            "time is over",
+            "purchase time",
+            "وقت غير كافي",
+            "الوقت غير كافي",
+        )
+    )
+
 async def _check_win(client, tid):
     try:
         win = await client.check_win(tid)
@@ -1928,6 +1943,10 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     # مدة الصفقة: افتراضياً 60 ثانية، ويمكن زيادتها حتى 90 ثانية عبر المتغير.
     trade_duration_sec = int(os.getenv("TRADE_DURATION_SEC", "60") or 60)
     trade_duration_sec = max(60, min(90, trade_duration_sec))
+    min_entry_window_sec = float(os.getenv("MIN_ENTRY_WINDOW_SEC", "8") or 8)
+    min_entry_window_sec = max(3.0, min(20.0, min_entry_window_sec))
+    # منع تكرار نفس الصفقة المتتالية بسرعة
+    entry_cooldown_sec = max(30, trade_duration_sec)
 
     # يمنع بقاء worker قديم يعمل بعد Stop/Start جديد.
     def _should_stop() -> bool:
@@ -1939,6 +1958,8 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
     # تتبع آخر زوج استُخدم لتجنب التكرار
     last_used_asset = None
+    # منع تكرار نفس الإشارة أكثر من مرة في نفس دقيقة الشمعة
+    signal_attempted = {}
 
     # ── بدء تدفق الأسعار الحية لكل الأزواج ───────────────────────────────────
     if QX and S["client"]:
@@ -2157,6 +2178,37 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
             last_used_asset  = chosen_asset
             S["last_signal"] = direction
+            entry_key = f"{chosen_asset}:{direction}:{req.account_type}"
+            now_entry = time.time()
+            if (
+                S.get("_last_entry_key") == entry_key
+                and (now_entry - float(S.get("_last_entry_ts", 0) or 0)) < entry_cooldown_sec
+            ):
+                left_cd = int(entry_cooldown_sec - (now_entry - float(S.get("_last_entry_ts", 0) or 0)))
+                log.info("⏸️ تجاهل تكرار صفقة %s — تبقّى %ss", entry_key, max(1, left_cd))
+                stop.wait(timeout=1.0)
+                continue
+            # لا تحاول نفس الإشارة أكثر من مرة في نفس الدقيقة
+            candle_bucket = int(now_entry // 60)
+            signal_key = f"{entry_key}:{candle_bucket}"
+            if signal_key in signal_attempted:
+                stop.wait(timeout=1.0)
+                continue
+            # تنظيف قديم
+            if len(signal_attempted) > 300:
+                cutoff = int(time.time()) - 600
+                for k, ts in list(signal_attempted.items()):
+                    if ts < cutoff:
+                        signal_attempted.pop(k, None)
+            signal_attempted[signal_key] = int(now_entry)
+            # تحقّق نافذة الدخول المتبقية قبل الإرسال حتى لا يرجع "وقت غير كافي"
+            now_dt = datetime.now()
+            sec_left = 60.0 - (now_dt.second + now_dt.microsecond / 1_000_000)
+            if sec_left < min_entry_window_sec:
+                S["status_msg"] = f"⏸️ تخطّي الإشارة: الوقت المتبقي للدخول غير كافٍ ({sec_left:.1f}s)"
+                log.info("⏸️ skip entry بسبب نافذة وقت غير كافية: left=%.2fs", sec_left)
+                stop.wait(timeout=1.0)
+                continue
 
             # ── تنفيذ فوري عند ظهور الإشارة (بدون انتظار بداية الدقيقة)
             log.info(
@@ -2198,6 +2250,9 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     else:
                         msg = str(r.get("msg",""))
                         log.warning(f"⚠️ {msg}")
+                        if _is_time_insufficient_msg(msg):
+                            S["status_msg"] = "⏸️ المنصة رفضت الدخول: الوقت غير كافٍ لهذه الإشارة"
+                            break
                         if "not_money" in msg.lower():
                             log.warning("💸 رصيد غير كافٍ — توقف")
                             S["current_trade"] = None
@@ -2214,6 +2269,9 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     break
                 stop.wait(timeout=2.0)
                 continue
+            # تم فتح صفقة فعلية — ثبّت بصمة آخر دخول لتجنّب التكرار السريع
+            S["_last_entry_key"] = entry_key
+            S["_last_entry_ts"] = time.time()
 
             # ── انتظار مدة الصفقة كاملة ───────────────────────────────────
             # مع صفقات مفتوحة: لا نخرج مبكراً بسبب stop — وإلا تُفتح صفقات على Quotex ولا تُسجَّل في wins/losses
@@ -2266,26 +2324,24 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             if QX and S["client"]:
                 mode = "REAL" if req.account_type=="real" else "PRACTICE"
                 prev_bal = S["real_balance"] if req.account_type=="real" else S["demo_balance"]
-                # انتظار حتى يتغير الرصيد فعلاً في المنصة
-                log.info(f"⏳ انتظار تحديث الرصيد (الرصيد قبل: {prev_bal})")
-                for wait_attempt in range(20):
-                    time.sleep(3)
+                # قراءة سريعة غير حاجزة: لا ننتظر دقيقة كاملة حتى لا تتأخر الدورة
+                for wait_attempt in range(2):
                     try:
-                        bal = run_async_for(S["email"], _get_single_balance(S["client"],mode), 12)
-                        if bal > 0 and bal != prev_bal:
+                        bal = run_async_for(S["email"], _get_single_balance(S["client"], mode), 8)
+                        if bal > 0:
                             current_bal = bal
-                            log.info(f"💰 رصيد تحدّث (محاولة {wait_attempt+1}): {prev_bal} → {current_bal}")
-                            break
-                        elif bal > 0:
-                            log.info(f"⏳ رصيد لم يتغير بعد: {bal} (محاولة {wait_attempt+1})")
-                            current_bal = bal
-                    except: pass
+                            if bal != prev_bal:
+                                log.info(f"💰 رصيد تحدّث سريعاً: {prev_bal} → {current_bal}")
+                                break
+                    except Exception:
+                        pass
+                    time.sleep(1)
                 if current_bal > 0:
                     if req.account_type=="real": S["real_balance"] = current_bal
                     else: S["demo_balance"] = current_bal
                 else:
                     current_bal = prev_bal
-                    log.warning("⚠️ لم يتم تحديث الرصيد")
+                    log.info("ℹ️ الرصيد لم يتحدّث فوراً — المتابعة بدون تأخير")
             else:
                 # محاكاة
                 if req.account_type == "demo":
