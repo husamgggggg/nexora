@@ -725,16 +725,16 @@ function pairLabel(asset){return asset.replace('_otc',' OTC');}
 function pairPayout(asset){return `${ASSET_PAYOUT[asset]||80}%`;}
 
 function setAssetsFromServer(d){
-  if(!d||!Array.isArray(d.assets))return false;
-  ASSETS_OTC=(Array.isArray(d.otc)?d.otc:d.assets.filter(a=>String(a).endsWith('_otc'))).slice(0,80);
-  ASSETS_LIVE=(Array.isArray(d.live)?d.live:d.assets.filter(a=>!String(a).endsWith('_otc'))).slice(0,80);
+  if(!d||!Array.isArray(d.assets)||d.assets.length===0)return false;
+  ASSETS_OTC=(Array.isArray(d.otc)&&d.otc.length?d.otc:d.assets.filter(a=>String(a).endsWith('_otc'))).slice(0,80);
+  ASSETS_LIVE=(Array.isArray(d.live)&&d.live.length?d.live:d.assets.filter(a=>!String(a).endsWith('_otc'))).slice(0,80);
   ASSETS=[...ASSETS_OTC,...ASSETS_LIVE];
   ASSETS.forEach(ensurePayout);
-  if(ASSETS.length && !ASSETS.includes(s.asset)){
-    s.asset=ASSETS[0];
+  if(!ASSETS.includes(s.asset)){
+    s.asset=ASSETS[0]||'EURUSD_otc';
   }
   s.assets=(s.assets||[]).filter(a=>ASSETS.includes(a));
-  if(ASSETS.length && s.assets.length===0 && s.asset)s.assets=[s.asset];
+  if(s.assets.length===0 && s.asset)s.assets=[s.asset];
   return true;
 }
 
