@@ -686,24 +686,19 @@ h1{font-size:18px;}
 
 <script>
 const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null};
-const DEFAULT_ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','EURJPY_otc','GBPJPY_otc','AUDCAD_otc','USDCAD_otc','EURGBP_otc','EURAUD_otc','GBPAUD_otc','NZDUSD_otc'];
-const DEFAULT_ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
-let ASSETS_OTC=[...DEFAULT_ASSETS_OTC];
-let ASSETS_LIVE=[...DEFAULT_ASSETS_LIVE];
-let ASSETS=[...ASSETS_OTC,...ASSETS_LIVE];
+const ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','EURJPY_otc','GBPJPY_otc','AUDCAD_otc','USDCAD_otc','EURGBP_otc','EURAUD_otc','GBPAUD_otc','NZDUSD_otc'];
+const ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
+const ASSETS=[...ASSETS_OTC,...ASSETS_LIVE];
 const MAX_ASSETS=3;
 const PAIR_FLAGS={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz'};
 const ASSET_PAYOUT={};
-function ensurePayout(asset){
-  if(ASSET_PAYOUT[asset]!=null)return;
-  const min=asset.endsWith('_otc')?72:60;
-  const max=asset.endsWith('_otc')?92:86;
-  ASSET_PAYOUT[asset]=Math.round(min+Math.random()*(max-min));
-}
-ASSETS.forEach(ensurePayout);
+ASSETS.forEach(a=>{
+  const min=a.endsWith('_otc')?72:60;
+  const max=a.endsWith('_otc')?92:86;
+  ASSET_PAYOUT[a]=Math.round(min+Math.random()*(max-min));
+});
 function tickSimPayouts(){
   ASSETS.forEach(a=>{
-    ensurePayout(a);
     const min=a.endsWith('_otc')?72:60;
     const max=a.endsWith('_otc')?92:86;
     const step=(Math.random()<0.5?-1:1)*(1+Math.floor(Math.random()*2));
@@ -723,32 +718,6 @@ function pairFlags(asset){
 }
 function pairLabel(asset){return asset.replace('_otc',' OTC');}
 function pairPayout(asset){return `${ASSET_PAYOUT[asset]||80}%`;}
-
-function setAssetsFromServer(d){
-  if(!d||!Array.isArray(d.assets)||d.assets.length===0)return false;
-  ASSETS_OTC=(Array.isArray(d.otc)&&d.otc.length?d.otc:d.assets.filter(a=>String(a).endsWith('_otc'))).slice(0,80);
-  ASSETS_LIVE=(Array.isArray(d.live)&&d.live.length?d.live:d.assets.filter(a=>!String(a).endsWith('_otc'))).slice(0,80);
-  ASSETS=[...ASSETS_OTC,...ASSETS_LIVE];
-  ASSETS.forEach(ensurePayout);
-  if(!ASSETS.includes(s.asset)){
-    s.asset=ASSETS[0]||'EURUSD_otc';
-  }
-  s.assets=(s.assets||[]).filter(a=>ASSETS.includes(a));
-  if(s.assets.length===0 && s.asset)s.assets=[s.asset];
-  return true;
-}
-
-async function refreshAssets(){
-  const q=s.token?('?token='+encodeURIComponent(s.token)):'';
-  const d=await api('/assets'+q);
-  if(!setAssetsFromServer(d)){
-    ASSETS_OTC=[...DEFAULT_ASSETS_OTC];
-    ASSETS_LIVE=[...DEFAULT_ASSETS_LIVE];
-    ASSETS=[...ASSETS_OTC,...ASSETS_LIVE];
-    ASSETS.forEach(ensurePayout);
-  }
-  updAssetLabel();
-}
 function renderPairOption(asset){
   const [b,q]=pairFlags(asset);
   return `<div class="oi-row"><div class="oi-main"><span class="oi-check">✓</span></div><div class="oi-main"><span class="oi-name">${pairLabel(asset)}</span><img class="oi-flag" src="https://flagcdn.com/w20/${b}.png" alt="${b}"><img class="oi-flag" src="https://flagcdn.com/w20/${q}.png" alt="${q}"></div></div>`;
@@ -773,7 +742,6 @@ async function api(path,method='GET',body=null){
   }
 }
 async function checkConn(){
-  await refreshAssets();
   const d=await api('/status?token='+s.token);
   if(d && typeof d.sim_mode==='boolean') s.sim=!!d.sim_mode;
   renderBadge();
@@ -856,9 +824,7 @@ function afterLogin(d){
   s.email=d.email;s.uid='#'+d.user_id;s.rBal=d.real_balance||0;s.dBal=d.demo_balance||0;s.currency=d.currency||'USD';
   document.getElementById('hId').textContent=s.uid;document.getElementById('hEm').textContent=s.email;document.getElementById('dEm').textContent=s.email;
   document.getElementById('pinBox').style.display='none';document.getElementById('loginBox').style.display='block';
-  updBals();toast('✅ مرحباً بك في نيكسورا تريد','ok');go('sBot',2);
-  refreshAssets();
-  if(!s.sim)startPoll();
+  updBals();toast('✅ مرحباً بك في نيكسورا تريد','ok');go('sBot',2);if(!s.sim)startPoll();
 }
 async function doLogout(){
   doStop();clearInterval(s.pollInt);if(s.token)await api('/logout','POST',{token:s.token});
@@ -1123,23 +1089,14 @@ document.addEventListener('input',e=>{
   if(e.target.id==='iSL'&&s.sOn)document.getElementById('slDesc').textContent=`يوقف عند -${e.target.value}`;
 });
 function updAssetLabel(){const arr=s.assets.length>0?s.assets:[s.asset];document.getElementById('vAsset').textContent=arr.map(a=>a.replace('_otc',' OTC')).join(' · ');}
-async function om(key){
+function om(key){
   if(key==='assets'){
-    await refreshAssets();
     document.getElementById('mTit').textContent='اختر الأزواج';
     const list=document.getElementById('mList');list.innerHTML='';
-    if(ASSETS_OTC.length){
-      const h1=document.createElement('div');h1.style.cssText='font-size:10px;color:var(--gold);font-weight:700;padding:4px 2px 8px;letter-spacing:1px;';h1.textContent='── OTC ──';list.appendChild(h1);
-      ASSETS_OTC.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
-    }
-    if(ASSETS_LIVE.length){
-      const h2=document.createElement('div');h2.style.cssText='font-size:10px;color:var(--g);font-weight:700;padding:10px 2px 8px;letter-spacing:1px;';h2.textContent='── البورصة ──';list.appendChild(h2);
-      ASSETS_LIVE.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
-    }
-    if(!ASSETS.length){
-      const none=document.createElement('div');none.className='oi';none.style.opacity='.7';none.textContent='لا توجد أزواج مفتوحة حالياً';
-      list.appendChild(none);
-    }
+    const h1=document.createElement('div');h1.style.cssText='font-size:10px;color:var(--gold);font-weight:700;padding:4px 2px 8px;letter-spacing:1px;';h1.textContent='── OTC ──';list.appendChild(h1);
+    ASSETS_OTC.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
+    const h2=document.createElement('div');h2.style.cssText='font-size:10px;color:var(--g);font-weight:700;padding:10px 2px 8px;letter-spacing:1px;';h2.textContent='── البورصة ──';list.appendChild(h2);
+    ASSETS_LIVE.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
     const conf=document.createElement('button');conf.style.cssText='width:100%;margin-top:14px;background:linear-gradient(135deg,var(--g),var(--g2));color:var(--bg);border:none;border-radius:13px;padding:14px;font-family:Roboto,sans-serif;font-size:14px;font-weight:900;cursor:pointer;';
     conf.onclick=()=>{if(s.assets.length===0){toast('اختر زوج واحد على الأقل','er');return;}updAssetLabel();cm(null,true);};
     function updateConf(){conf.textContent=`✅ تأكيد (${s.assets.length}/${MAX_ASSETS})`;}updateConf();

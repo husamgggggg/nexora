@@ -239,113 +239,6 @@ _load_admin_tokens_into_set()
 def save_users(): save(USERS_F, USERS)
 
 
-DEFAULT_ASSETS_OTC = [
-    "EURUSD_otc","GBPUSD_otc","AUDUSD_otc","USDJPY_otc","EURJPY_otc","GBPJPY_otc",
-    "AUDCAD_otc","USDCAD_otc","EURGBP_otc","EURAUD_otc","GBPAUD_otc","NZDUSD_otc",
-]
-DEFAULT_ASSETS_LIVE = [
-    "EURUSD","GBPUSD","AUDUSD","USDJPY","EURJPY","GBPJPY",
-    "AUDCAD","USDCAD","EURGBP","EURAUD","GBPAUD","NZDUSD",
-]
-_ASSET_RX = re.compile(r"^[A-Z]{6}(?:_OTC)?$")
-
-
-def _canon_asset(sym: str) -> str:
-    s = str(sym or "").strip().replace("/", "").replace("-", "").replace(" ", "")
-    s = s.upper()
-    if s.endswith("_OTC"):
-        return s[:6] + "_otc"
-    return s
-
-
-def _extract_open_assets_from_obj(obj, out: set) -> None:
-    if obj is None:
-        return
-    if isinstance(obj, (list, tuple)):
-        for it in obj:
-            _extract_open_assets_from_obj(it, out)
-        return
-    if isinstance(obj, dict):
-        # حالة 1: مفاتيح مباشرة EURUSD / EURUSD_OTC
-        for k, v in obj.items():
-            if isinstance(k, str):
-                kk = _canon_asset(k)
-                ku = kk.upper().replace("_otc", "_OTC")
-                if _ASSET_RX.match(ku):
-                    if isinstance(v, bool):
-                        if v:
-                            out.add(kk)
-                        continue
-                    if isinstance(v, dict):
-                        is_open = v.get("open", v.get("is_open", v.get("enabled", True)))
-                        if bool(is_open):
-                            out.add(kk)
-                        continue
-                    out.add(kk)
-        # حالة 2: عناصر بشكل list/dict داخل قيمة
-        for v in obj.values():
-            if isinstance(v, (list, tuple, dict)):
-                _extract_open_assets_from_obj(v, out)
-        # حالة 3: عنصر واحد فيه symbol/name + open
-        name = obj.get("asset", obj.get("symbol", obj.get("name", obj.get("pair", ""))))
-        if name:
-            nn = _canon_asset(name)
-            nu = nn.upper().replace("_otc", "_OTC")
-            if _ASSET_RX.match(nu):
-                is_open = obj.get("open", obj.get("is_open", obj.get("enabled", True)))
-                if bool(is_open):
-                    out.add(nn)
-
-
-async def _get_open_assets_async(client) -> set:
-    out = set()
-    try:
-        await _ensure_quotex_assets(client)
-    except Exception:
-        pass
-    candidates = []
-    try:
-        if hasattr(client, "get_all_assets"):
-            candidates.append(await client.get_all_assets())
-    except Exception:
-        pass
-    api = getattr(client, "api", None)
-    if api is not None:
-        for n in ("all_assets", "assets", "instruments", "codes_asset"):
-            try:
-                candidates.append(getattr(api, n, None))
-            except Exception:
-                pass
-    try:
-        candidates.append(getattr(client, "codes_asset", None))
-    except Exception:
-        pass
-    for c in candidates:
-        _extract_open_assets_from_obj(c, out)
-    # fallback: إن لم تتوفر حالة open/close، استخدم مفاتيح codes_asset المتاحة
-    if not out:
-        try:
-            codes = getattr(api, "codes_asset", None) if api is not None else getattr(client, "codes_asset", None)
-            if isinstance(codes, dict):
-                for k in codes.keys():
-                    kk = _canon_asset(k)
-                    ku = kk.upper().replace("_otc", "_OTC")
-                    if _ASSET_RX.match(ku):
-                        out.add(kk)
-        except Exception:
-            pass
-    return out
-
-
-def _get_open_assets_now(S: dict) -> set:
-    if not S or not S.get("client") or not S.get("email"):
-        return set()
-    try:
-        return run_async_for(S["email"], _get_open_assets_async(S["client"]), 35)
-    except Exception:
-        return set()
-
-
 def _resolve_user_email(raw: str):
     """مفتاح البريد في USERS (نفس السلسلة المحفوظة) مع تجاهل حالة الأحرف والفراغات."""
     e = (raw or "").strip()
@@ -2046,8 +1939,6 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
     # تتبع آخر زوج استُخدم لتجنب التكرار
     last_used_asset = None
-    _open_assets = set(all_assets)
-    _last_assets_sync = 0.0
 
     # ── بدء تدفق الأسعار الحية لكل الأزواج ───────────────────────────────────
     if QX and S["client"]:
@@ -2117,22 +2008,6 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
     while not _should_stop():
         try:
-            # مزامنة الأزواج المفتوحة في Quotex (مفتوح يظهر، مقفل يُتخطّى)
-            if QX and S.get("client"):
-                _now_assets = time.time()
-                if _now_assets - _last_assets_sync >= 20.0:
-                    opened = _get_open_assets_now(S)
-                    if opened:
-                        _open_assets = set(opened)
-                    _last_assets_sync = _now_assets
-                available_assets = [a for a in all_assets if a in _open_assets]
-                if not available_assets:
-                    S["status_msg"] = "⏸️ الأزواج المختارة مقفلة حالياً في Quotex"
-                    stop.wait(timeout=2.0)
-                    continue
-            else:
-                available_assets = list(all_assets)
-
             # ── جمع الأسعار الحية ──────────────────────────────────────────
             if QX and S["client"]: _collect_price(S["client"], req.asset, S["email"])
 
@@ -2141,13 +2016,13 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
             # ── تحليل الشمعات ─────────────────────────────────────────────
             direction = "wait"
-            chosen_asset = available_assets[0]
+            chosen_asset = all_assets[0]
             burst_count = 1
             any_candles = False
 
             if QX and S["logged_in"] and S["client"]:
                 # جمع أسعار لكل الأزواج
-                for a in available_assets:
+                for a in all_assets:
                     _collect_price(S["client"], a, S["email"])
 
                 # تحليل كل الأزواج واختيار الأقوى إشارة
@@ -2165,7 +2040,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 _need_len = _min_bars
                 _max_len = 0
                 ema_src_label = ""
-                for a in available_assets:
+                for a in all_assets:
                     if req.strategy == "HUSAAM_PRIVATE":
                         candles, _csrc = _get_husaam_ema10_candles(
                             S["client"],
@@ -2282,10 +2157,6 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
             last_used_asset  = chosen_asset
             S["last_signal"] = direction
-            if QX and _open_assets and chosen_asset not in _open_assets:
-                log.info("⏸️ الزوج %s أصبح مقفلاً قبل التنفيذ — تخطّي", chosen_asset)
-                stop.wait(timeout=1.0)
-                continue
 
             # ── تنفيذ فوري عند ظهور الإشارة (بدون انتظار بداية الدقيقة)
             log.info(
@@ -2350,7 +2221,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             trade_end = time.time() + trade_duration_sec
             while time.time() < trade_end:
                 if QX and S["client"]:
-                    for a in available_assets:
+                    for a in all_assets:
                         _collect_price(S["client"], a, S["email"])
                 left = trade_end - time.time()
                 if left <= 0:
@@ -2894,33 +2765,6 @@ async def status(token: str=""):
         "candle_source":  S.get("candle_source",""),
         "status_msg":     S.get("status_msg",""),
         "login_error":    (S.get("login_error") or "")[:800],
-    }
-
-
-@app.get("/api/assets")
-async def api_assets(token: str = ""):
-    """
-    قائمة الأزواج الحالية من Quotex:
-    - المفتوح يظهر
-    - المقفل لا يظهر
-    """
-    S = get_session(token) if token else None
-    assets = set()
-    source = "default"
-    if S and S.get("logged_in") and S.get("client"):
-        assets = _get_open_assets_now(S)
-        if assets:
-            source = "quotex_open_assets"
-    if not assets:
-        assets = set(DEFAULT_ASSETS_OTC + DEFAULT_ASSETS_LIVE)
-    otc = sorted([a for a in assets if str(a).endswith("_otc")])
-    live = sorted([a for a in assets if not str(a).endswith("_otc")])
-    return {
-        "success": True,
-        "source": source,
-        "otc": otc,
-        "live": live,
-        "assets": otc + live,
     }
 
 if __name__ == "__main__":
