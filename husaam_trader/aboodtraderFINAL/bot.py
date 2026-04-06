@@ -239,6 +239,27 @@ _load_admin_tokens_into_set()
 def save_users(): save(USERS_F, USERS)
 
 
+def _resolve_user_email(raw: str):
+    """مفتاح البريد في USERS (نفس السلسلة المحفوظة) مع تجاهل حالة الأحرف والفراغات."""
+    e = (raw or "").strip()
+    if not e or "@" not in e:
+        return None
+    if e in USERS:
+        return e
+    low = e.lower()
+    for k in USERS:
+        if isinstance(k, str) and k.lower() == low:
+            return k
+    return None
+
+
+_DEFAULT_QX_LOGIN_FAIL = (
+    "رفضت Quotex تسجيل الدخول. تحقق من البريد وكلمة المرور. "
+    "إذا طلبت المنصة تحققاً سيظهر هنا حقل PIN. "
+    "إن استمر الفشل: VPN أو شبكة أخرى (حظر IP أو Cloudflare)."
+)
+
+
 def _user_display_id(email: str) -> int:
     """نفس معرّف العرض في /api/status."""
     if not email:
@@ -2506,30 +2527,40 @@ async def check_status(email: str):
 
 @app.post("/api/login")
 async def login(req: LoginReq):
-    if "@" not in req.email: raise HTTPException(400,"بريد غير صحيح")
-    if len(req.password)<4:  raise HTTPException(400,"كلمة مرور قصيرة")
-    if req.email not in USERS: raise HTTPException(403,"غير مسجّل — أرسل طلب انضمام")
-    if USERS[req.email]["status"] != "approved":
-        raise HTTPException(403,"لم يتم قبول طلبك بعد")
-    if USERS[req.email].get("session_token","") != req.token:
-        raise HTTPException(403,"انتهت الجلسة — تحقق من الحالة مرة أخرى")
+    qx_email = (req.email or "").strip()
+    if "@" not in qx_email:
+        raise HTTPException(400, "بريد غير صحيح")
+    if len(req.password) < 4:
+        raise HTTPException(400, "كلمة مرور قصيرة")
+    email_key = _resolve_user_email(qx_email)
+    if not email_key:
+        raise HTTPException(403, "غير مسجّل — أرسل طلب انضمام")
+    if USERS[email_key]["status"] != "approved":
+        raise HTTPException(403, "لم يتم قبول طلبك بعد")
+    if USERS[email_key].get("session_token", "") != req.token:
+        raise HTTPException(
+            403,
+            "انتهت الجلسة أو الرمز غير متطابق — من صفحة التسجيل اضغط «تحقق من الحالة» بالبريد نفسه ثم أعد تسجيل الدخول",
+        )
     S = get_session(req.token)
     if not S:
-        SESSIONS[req.token] = new_session(req.email)
+        SESSIONS[req.token] = new_session(email_key)
         S = SESSIONS[req.token]
     if QX:
         if S.get("client"):
-            try: run_async_for(req.email, _close(S["client"]),5)
-            except: pass
-        S["email"] = req.email
+            try:
+                run_async_for(email_key, _close(S["client"]), 5)
+            except Exception:
+                pass
+        S["email"] = email_key
         S["needs_pin"] = False
         S["login_error"] = ""
-        drain_pin_queue(req.email)
+        drain_pin_queue(email_key)
         # connect() يستدعي input() ويُعلّق على queue حتى يصل PIN من /api/pin.
         # إذا انتظرنا result(150) هنا، لا تُرسل الاستجابة أبداً → الواجهة لا تظهر حقل PIN.
-        _loop = get_session_loop(req.email)
+        _loop = get_session_loop(email_key)
         _fut = asyncio.run_coroutine_threadsafe(
-            _login_qx(req.email, req.password, S), _loop
+            _login_qx(email_key, req.password, S), _loop
         )
         _deadline = time.monotonic() + 150
         r = None
@@ -2554,31 +2585,46 @@ async def login(req: LoginReq):
             S["needs_pin"]=True
             return {"success":False,"needs_pin":True,"message":r.get("msg") or "أدخل PIN"}
         if not r["ok"]:
-            msg = str(r.get("msg","فشل"))
+            msg = str(r.get("msg") or "").strip()
+            if not msg or msg.lower() in ("false", "none", "unknown", "unknown error"):
+                msg = _DEFAULT_QX_LOGIN_FAIL
             # عند فشل Quotex لا ندخل محاكاة تلقائياً: يجب أن يكون الدخول حقيقي فقط.
-            blocked_region = any(x in msg.lower() for x in [
-                "service unavailable",
-                "not available in your region",
-                "region",
-                "cloudflare",
-                "websocket",
-                "handshake status 403",
-                "403 forbidden",
-            ])
+            ml = msg.lower()
+            blocked_region = any(
+                x in ml
+                for x in (
+                    "service unavailable",
+                    "not available in your region",
+                    "your region",
+                    "cloudflare",
+                    "websocket",
+                    "handshake status 403",
+                    "403 forbidden",
+                    "connection reset",
+                    "connection refused",
+                    "timed out",
+                    "timeout",
+                    "ssl",
+                    "certificate",
+                    "network is unreachable",
+                    "errno",
+                )
+            )
             if blocked_region:
                 raise HTTPException(
                     403,
                     "Quotex رفض اتصال WebSocket (غالباً حماية Cloudflare أو IP/منطقة). جرّب VPN أو شبكة أخرى، أو تشغيل البوت من مكان يصل فيه المتصفح إلى Quotex.",
                 )
+            log.warning("login Quotex فشل: %s", msg[:500])
             raise HTTPException(401, msg)
         S["client"]=r["client"]; S["real_balance"]=r["real"]
         S["demo_balance"]=r["demo"]; S["currency"]=r.get("cur","USD")
     else:
         S["real_balance"]=0.0; S["demo_balance"]=10_000.0; S["currency"]="USD"
-    S["logged_in"]=True; S["needs_pin"]=False; S["email"]=req.email
+    S["logged_in"]=True; S["needs_pin"]=False; S["email"]=email_key
     S["status_msg"] = ""
-    return {"success":True,"needs_pin":False,"email":req.email,
-            "user_id":abs(hash(req.email))%90_000_000+10_000_000,
+    return {"success":True,"needs_pin":False,"email":email_key,
+            "user_id":abs(hash(email_key))%90_000_000+10_000_000,
             "real_balance":S["real_balance"],"demo_balance":S["demo_balance"],
             "currency":S["currency"],"sim_mode":_is_session_sim_mode(S)}
 
