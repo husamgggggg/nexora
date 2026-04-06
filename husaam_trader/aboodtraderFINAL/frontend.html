@@ -903,7 +903,7 @@ function startPoll(){
     if(d.current_trade?.status==='pending'){
       const tidRaw=d.current_trade.id||(`${d.current_trade.asset}_${d.current_trade.started_at||''}`);
       const tid=String(tidRaw);
-      if(String(s.hiddenLiveTradeId||'')!==tid)showLive(d.current_trade.asset,d.current_trade.direction,60,tid);
+      if(String(s.hiddenLiveTradeId||'')!==tid)showLive(d.current_trade.asset,d.current_trade.direction,Number(d.current_trade.duration||60),tid);
       if(tid && s.lastTradePopupId!==tid){
         s.lastTradePopupId=tid;
         const a=(d.current_trade.asset||'').replace('_otc',' OTC');

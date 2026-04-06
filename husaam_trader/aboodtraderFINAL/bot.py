@@ -1864,12 +1864,16 @@ async def _login_qx(email, password, S):
         S["login_error"] = err[:800]
         return {"ok":False,"pin":False,"msg":err}
 
-async def _do_trade(client, asset, amount, direction, acc):
+async def _do_trade(client, asset, amount, direction, acc, duration_sec=60):
     try:
         await client.change_account("REAL" if acc=="real" else "PRACTICE")
         await asyncio.sleep(0.5)
-        ok, info = await client.buy(amount=amount, asset=asset,
-                                    direction=direction, duration=60)
+        ok, info = await client.buy(
+            amount=amount,
+            asset=asset,
+            direction=direction,
+            duration=int(duration_sec),
+        )
         if ok:
             tid = info.get("id") if isinstance(info,dict) else None
             log.info(f"✅ صفقة: {asset} {direction.upper()} {amount} id={tid}")
@@ -1921,6 +1925,17 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
         all_assets.insert(0, req.asset)
     all_assets = list(dict.fromkeys(all_assets))  # إزالة المكررات
     log.info(f"🤖 {S['email']} | {all_assets} | {req.amount} | {req.strategy} | {req.account_type}")
+    # مدة الصفقة: افتراضياً 60 ثانية، ويمكن زيادتها حتى 90 ثانية عبر المتغير.
+    trade_duration_sec = int(os.getenv("TRADE_DURATION_SEC", "60") or 60)
+    trade_duration_sec = max(60, min(90, trade_duration_sec))
+
+    # يمنع بقاء worker قديم يعمل بعد Stop/Start جديد.
+    def _should_stop() -> bool:
+        return (
+            stop.is_set()
+            or not bool(S.get("running", False))
+            or (S.get("stop_event") is not stop)
+        )
 
     # تتبع آخر زوج استُخدم لتجنب التكرار
     last_used_asset = None
@@ -1946,12 +1961,12 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     S["status_msg"] = "⏳ تجهيز المراقبة (أسعار حية للواجهة)..."
     log.info("⏳ جمع أسعار حية للمراقبة — %s ثانية...", _wu)
     warmup = time.time()
-    while time.time() - warmup < _wu and not stop.is_set():
+    while time.time() - warmup < _wu and not _should_stop():
         if QX and S["client"]:
             for a in all_assets:
                 _collect_price(S["client"], a, S["email"])
         stop.wait(timeout=1)
-    if stop.is_set(): return
+    if _should_stop(): return
 
     _tick_total = sum(len(_price_buffers.get(a, [])) for a in all_assets)
     log.info("✅ مراقبة: %s تيك محفوظ — بدء الحلقة (%s)", _tick_total, req.strategy)
@@ -1991,7 +2006,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     log.info(f"🏁 رصيد البداية المعتمد: {start_bal}")
 
 
-    while not stop.is_set():
+    while not _should_stop():
         try:
             # ── جمع الأسعار الحية ──────────────────────────────────────────
             if QX and S["client"]: _collect_price(S["client"], req.asset, S["email"])
@@ -2143,11 +2158,10 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             last_used_asset  = chosen_asset
             S["last_signal"] = direction
 
-            # ── توقيت الإرسال
-            wait_for_minute_start(stop)
-            if stop.is_set(): break
-
-            log.info(f"🎯 {direction.upper()} | {datetime.now().strftime('%H:%M:%S')}")
+            # ── تنفيذ فوري عند ظهور الإشارة (بدون انتظار بداية الدقيقة)
+            log.info(
+                f"🎯 {direction.upper()} | تنفيذ فوري | {datetime.now().strftime('%H:%M:%S')} | مدة={trade_duration_sec}s"
+            )
 
             # ── تسجيل/تنفيذ الصفقات (Burst) ────────────────────────────────
             opened_trades = []
@@ -2157,7 +2171,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     "asset":      chosen_asset,
                     "direction":  direction,
                     "amount":     req.amount,
-                    "duration":   60,
+                    "duration":   trade_duration_sec,
                     "status":     "pending",
                     "profit":     0,
                     "started_at": datetime.now().isoformat(),
@@ -2167,8 +2181,18 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 S["current_trade"] = trade
                 tid = None
                 if QX and S["logged_in"] and S["client"]:
-                    r = run_async_for(S["email"], _do_trade(S["client"],chosen_asset,req.amount,
-                                            direction,req.account_type), 20)
+                    r = run_async_for(
+                        S["email"],
+                        _do_trade(
+                            S["client"],
+                            chosen_asset,
+                            req.amount,
+                            direction,
+                            req.account_type,
+                            trade_duration_sec,
+                        ),
+                        20,
+                    )
                     if r["ok"]:
                         tid = r.get("id")
                     else:
@@ -2186,15 +2210,15 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
             if not opened_trades:
                 S["current_trade"] = None
-                if stop.is_set():
+                if _should_stop():
                     break
                 stop.wait(timeout=2.0)
                 continue
 
-            # ── انتظار 60 ثانية كاملة ─────────────────────────────────────
+            # ── انتظار مدة الصفقة كاملة ───────────────────────────────────
             # مع صفقات مفتوحة: لا نخرج مبكراً بسبب stop — وإلا تُفتح صفقات على Quotex ولا تُسجَّل في wins/losses
-            log.info("⏳ انتظار 60 ثانية...")
-            trade_end = time.time() + 60
+            log.info("⏳ انتظار %s ثانية...", trade_duration_sec)
+            trade_end = time.time() + trade_duration_sec
             while time.time() < trade_end:
                 if QX and S["client"]:
                     for a in all_assets:
@@ -2271,10 +2295,14 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     S["real_balance"] = round((S.get("real_balance") or start_bal) + total_prf, 2)
                     current_bal = S["real_balance"]
 
-            # الربح الحقيقي = رصيد المنصة الحالي - رصيد البداية فقط
-            real_profit = round(current_bal - start_bal, 2)
+            # صافي الجلسة يجب أن يساوي مجموع أرباح/خسائر الصفقات المسجّلة فعلياً
+            # (أدق من الاعتماد على فرق الرصيد فقط عند تأخر تحديث المنصة)
+            real_profit = round(sum(float(t.get("profit", 0) or 0) for t in S["trades"]), 2)
             S["session_profit"] = real_profit
-            log.info(f"💰 رصيد={current_bal} | بداية={start_bal} | ربح={real_profit:+.2f}")
+            bal_delta = round(current_bal - start_bal, 2)
+            log.info(
+                f"💰 رصيد={current_bal} | بداية={start_bal} | Δرصيد={bal_delta:+.2f} | صافي صفقات={real_profit:+.2f}"
+            )
 
             # ── فحص الحدود ────────────────────────────────────────────────
             if req.profit_limit > 0 and real_profit >= req.profit_limit:
@@ -2291,7 +2319,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 S["running"] = False
                 stop.set(); break
 
-            if stop.is_set():
+            if _should_stop():
                 log.info("🛑 إيقاف بعد تسوية الصفقات — خروج من حلقة البوت")
                 break
 
