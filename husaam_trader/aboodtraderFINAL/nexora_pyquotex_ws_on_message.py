@@ -13,6 +13,56 @@ import time
 logger = logging.getLogger(__name__)
 
 
+def _rows_look_like_instruments(rows) -> bool:
+    """صفوف أدوات Quotex: قائمة من القوائم، عادة ≥10–15 عمودًا."""
+    if not isinstance(rows, list) or not rows:
+        return False
+    r0 = rows[0]
+    return isinstance(r0, (list, tuple)) and len(r0) >= 10
+
+
+def _parse_engineio_json(msg_str: str):
+    """
+    رسائل Socket.IO عبر Engine.IO غالبًا `42["event", data]` — أحيانًا يكفي حرف واحد
+    وأحيانًا حرفان قبل JSON. نجرّب 1 و2 ثم السلسلة كاملة.
+    """
+    if len(msg_str) <= 1:
+        return None
+    for skip in (1, 2):
+        if len(msg_str) <= skip:
+            continue
+        try:
+            return json.loads(msg_str[skip:])
+        except (ValueError, TypeError):
+            continue
+    try:
+        return json.loads(msg_str)
+    except (ValueError, TypeError):
+        return None
+
+
+def _nexora_try_assign_instruments(api, message) -> None:
+    """
+    stable_api.get_instruments ينتظر api.instruments (قائمة غير فارغة).
+    النسخة الأصلية تعتمد على substring "call"/"put" داخل str(message) — قد لا يتحقق
+    مع تنسيقات جديدة. نملأ القائمة من حدث instruments/list أو من شكل الصفوف.
+    """
+    if message is None:
+        return
+    if isinstance(message, list) and len(message) >= 2:
+        head = message[0]
+        if isinstance(head, str) and "instruments" in head.lower():
+            payload = message[1]
+            if isinstance(payload, list) and _rows_look_like_instruments(payload):
+                api.instruments = payload
+                return
+    if isinstance(message, list) and _rows_look_like_instruments(message):
+        api.instruments = message
+        return
+    if "call" in str(message) or "put" in str(message):
+        api.instruments = message
+
+
 def on_message(self, wss, msg):
     """نسخة آمنة من WebsocketClient.on_message."""
     self.state.ssl_Mutual_exclusion = True
@@ -33,16 +83,12 @@ def on_message(self, wss, msg):
         message = msg_str
 
         if len(msg_str) > 1:
-            msg_parsed_str = msg_str[1:]
-            logger.debug(msg_parsed_str)
-            try:
-                message_json = json.loads(msg_parsed_str)
+            logger.debug(msg_str[:500])
+            message_json = _parse_engineio_json(msg_str)
+            if message_json is not None:
                 message = message_json
                 self.api.wss_message = message
-                if "call" in str(message) or "put" in str(message):
-                    self.api.instruments = message
-            except (ValueError, TypeError):
-                pass
+                _nexora_try_assign_instruments(self.api, message)
             if isinstance(message, dict):
                 if message.get("signals"):
                     time_in = message.get("time")
