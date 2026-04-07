@@ -921,10 +921,20 @@ function startPoll(){
       else{ csh.style.display='none'; }
     }
     if(d.status_msg&&d.status_msg!==''){
-      toast(d.status_msg,d.status_msg.includes('🎯')?'ok':'er');
-      let banner=document.getElementById('statusBanner');
-      if(!banner){banner=document.createElement('div');banner.id='statusBanner';banner.style.cssText='position:fixed;top:65px;left:50%;transform:translateX(-50%);z-index:500;background:var(--card2);border:2px solid;border-radius:16px;padding:14px 20px;font-size:14px;font-weight:700;text-align:center;max-width:90%;backdrop-filter:blur(12px);box-shadow:0 8px 30px rgba(0,0,0,.5);';document.body.appendChild(banner);}
-      banner.textContent=d.status_msg;banner.style.borderColor=d.status_msg.includes('🎯')?'var(--g)':'var(--r)';banner.style.color=d.status_msg.includes('🎯')?'var(--g)':'var(--r)';banner.style.display='block';
+      const sm=String(d.status_msg);
+      const hideSkipUi=(function(t){
+        if(!t)return false;
+        if(t.indexOf('نافذة الدخول خارج المدى')>=0)return true;
+        if(t.indexOf('تخطي الإشارة')>=0||t.indexOf('تخطّي الإشارة')>=0)return true;
+        if(t.indexOf('الوقت غير كافٍ لهذه الإشارة')>=0)return true;
+        return false;
+      })(sm);
+      if(!hideSkipUi){
+        toast(sm,sm.includes('🎯')?'ok':'er');
+        let banner=document.getElementById('statusBanner');
+        if(!banner){banner=document.createElement('div');banner.id='statusBanner';banner.style.cssText='position:fixed;top:65px;left:50%;transform:translateX(-50%);z-index:500;background:var(--card2);border:2px solid;border-radius:16px;padding:14px 20px;font-size:14px;font-weight:700;text-align:center;max-width:90%;backdrop-filter:blur(12px);box-shadow:0 8px 30px rgba(0,0,0,.5);';document.body.appendChild(banner);}
+        banner.textContent=sm;banner.style.borderColor=sm.includes('🎯')?'var(--g)':'var(--r)';banner.style.color=sm.includes('🎯')?'var(--g)':'var(--r)';banner.style.display='block';
+      }else{const banner=document.getElementById('statusBanner');if(banner)banner.style.display='none';}
     }else{const banner=document.getElementById('statusBanner');if(banner)banner.style.display='none';}
     if(!d.running&&s.running){s.running=false;document.getElementById('stBtn').textContent='ابدأ التداول';document.getElementById('stBtn').classList.remove('stop');}
   },5000);
