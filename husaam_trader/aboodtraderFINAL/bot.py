@@ -8,7 +8,7 @@ NEXORA TRADE Bot — النسخة النهائية الكاملة
 ✅ متعدد المشتركين كل بحسابه المستقل
 ✅ إشعار عند تحقق الهدف
 """
-import asyncio, base64, html, json, logging, os, queue, random, re, ssl
+import asyncio, base64, html, json, logging, os, queue, random, re, socket, ssl, subprocess
 import secrets, threading, time, traceback
 from contextlib import asynccontextmanager
 import urllib.parse
@@ -440,6 +440,77 @@ def establish_websocket_with_stealth(proxy=None):
     return None
 
 
+_PW_BRIDGE_PROC = None
+_PW_BRIDGE_PORT = None
+
+
+def _pick_free_port() -> int:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = int(s.getsockname()[1])
+    s.close()
+    return port
+
+
+def _wait_port_open(host: str, port: int, timeout_sec: float = 8.0) -> bool:
+    end = time.time() + timeout_sec
+    while time.time() < end:
+        try:
+            with socket.create_connection((host, port), timeout=1.0):
+                return True
+        except Exception:
+            time.sleep(0.15)
+    return False
+
+
+def _ensure_playwright_bridge(target_ws_url: str):
+    global _PW_BRIDGE_PROC, _PW_BRIDGE_PORT
+    if not target_ws_url:
+        return None
+    bridge_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ws_bridge.py")
+    if not os.path.isfile(bridge_file):
+        log.warning("Playwright bridge file غير موجود: %s", bridge_file)
+        return None
+    if _PW_BRIDGE_PROC is not None and _PW_BRIDGE_PROC.poll() is None and _PW_BRIDGE_PORT:
+        return f"ws://127.0.0.1:{_PW_BRIDGE_PORT}"
+
+    port = _pick_free_port()
+    cmd = [
+        os.getenv("PYTHON_BIN", "python"),
+        bridge_file,
+        "--listen-host",
+        "127.0.0.1",
+        "--listen-port",
+        str(port),
+        "--target-url",
+        target_ws_url,
+    ]
+    try:
+        _PW_BRIDGE_PROC = subprocess.Popen(
+            cmd,
+            cwd=os.path.dirname(bridge_file),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        _PW_BRIDGE_PORT = port
+    except Exception as e:
+        log.warning("تعذر تشغيل Playwright bridge: %s", e)
+        _PW_BRIDGE_PROC = None
+        _PW_BRIDGE_PORT = None
+        return None
+    if not _wait_port_open("127.0.0.1", port, 10.0):
+        log.warning("Playwright bridge لم يبدأ على المنفذ %s", port)
+        try:
+            _PW_BRIDGE_PROC.kill()
+        except Exception:
+            pass
+        _PW_BRIDGE_PROC = None
+        _PW_BRIDGE_PORT = None
+        return None
+    log.info("✅ Playwright WS bridge started: ws://127.0.0.1:%s", port)
+    return f"ws://127.0.0.1:{port}"
+
+
 def _install_pyquotex_ws_proxy_patch(proxies):
     """
     pyquotex يمرّر proxy لطلبات HTTP فقط. هذا patch يمرّره أيضاً لـ WebSocket.
@@ -478,17 +549,17 @@ def _install_pyquotex_ws_proxy_patch(proxies):
         if not self.state.SSID:
             await self.authenticate()
         self.websocket_client = _qx_api_mod.WebsocketClient(self)
-        # قبل أي اتصال WS أساسي: محاولة Stealth preflight لتهيئة تحديات Cloudflare.
-        try:
-            stealth_proxy = str(proxies.get("https") or proxies.get("http") or "") if isinstance(proxies, dict) else None
-            pre_ws = establish_websocket_with_stealth(proxy=stealth_proxy)
-            if pre_ws and getattr(pre_ws, "sock", None):
-                try:
-                    pre_ws.close()
-                except Exception:
-                    pass
-        except Exception as _e:
-            log.debug("Stealth preflight skipped: %s", _e)
+        use_bridge = os.getenv("QUOTEX_USE_PLAYWRIGHT_BRIDGE", "").strip().lower() in ("1", "true", "yes", "on")
+        bridge_ws_url = None
+        if use_bridge:
+            try:
+                target_ws_url = getattr(self.websocket, "url", "") or ""
+                bridge_ws_url = _ensure_playwright_bridge(target_ws_url)
+                if bridge_ws_url:
+                    self.websocket.url = bridge_ws_url
+                    log.info("🔁 WebSocket redirected via Playwright bridge: %s", bridge_ws_url)
+            except Exception as e:
+                log.warning("Playwright bridge redirect failed: %s", e)
         if ws_insecure_ssl:
             log.warning(
                 "WebSocket عبر بروكسي MITM: تعطيل التحقق من شهادة TLS (ZenRows أو QUOTEX_WS_INSECURE_SSL=1)"
@@ -511,13 +582,14 @@ def _install_pyquotex_ws_proxy_patch(proxies):
             "ping_interval": 24,
             "ping_timeout": 20,
             "ping_payload": "2",
-            "origin": self.https_url,
-            "host": f"ws2.{self.host}",
+            "origin": self.https_url if not bridge_ws_url else "http://127.0.0.1",
+            "host": (f"ws2.{self.host}" if not bridge_ws_url else f"127.0.0.1:{_PW_BRIDGE_PORT}"),
             "sslopt": sslopt,
         }
 
-        # تمرير بروكسي WebSocket بنفس إعدادات HTTPS proxy.
-        payload.update(ws_proxy)
+        # عند استخدام bridge المحلي لا نمرّر proxy للـWS.
+        if not bridge_ws_url:
+            payload.update(ws_proxy)
 
         self.websocket_thread = _qx_api_mod.threading.Thread(
             target=self.websocket.run_forever, kwargs=payload

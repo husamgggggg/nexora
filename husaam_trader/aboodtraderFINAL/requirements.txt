@@ -7,3 +7,7 @@ numpy
 python-dotenv
 pyquotex @ git+https://github.com/cleitonleonel/pyquotex.git
 zenrows
+websocket-client
+curl-cffi
+websockets
+playwright
