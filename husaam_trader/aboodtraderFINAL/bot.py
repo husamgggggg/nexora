@@ -176,13 +176,30 @@ def _parse_ws_proxy_from_http_proxies(proxies):
     if not isinstance(proxies, dict):
         return {}
     raw = str(proxies.get("https") or proxies.get("http") or "").strip()
+    raw = raw.strip(" \t\n\r\"'")
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
+        raw = raw[1:-1].strip()
     if not raw:
         return {}
     try:
         u = urllib.parse.urlparse(raw)
     except Exception:
         return {}
-    if not u.hostname or not u.port:
+    host = u.hostname
+    if not host:
+        return {}
+    port = None
+    try:
+        port = u.port
+    except ValueError:
+        port = None
+    if port is None and u.netloc:
+        tail = u.netloc.split("@")[-1]
+        if ":" in tail:
+            maybe = tail.rsplit(":", 1)[-1].strip().strip('"').strip("'")
+            if maybe.isdigit():
+                port = int(maybe)
+    if not port:
         return {}
 
     scheme = (u.scheme or "http").lower()
@@ -194,8 +211,8 @@ def _parse_ws_proxy_from_http_proxies(proxies):
         ptype = "http"
 
     ws_proxy = {
-        "http_proxy_host": u.hostname,
-        "http_proxy_port": int(u.port),
+        "http_proxy_host": host,
+        "http_proxy_port": int(port),
         "proxy_type": ptype,
     }
     user = urllib.parse.unquote(u.username) if u.username else None
