@@ -2600,14 +2600,10 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                         d, score = analyze_score(candles, req.strategy)
                         _sig = f"{a}:{d}:{score}"
                         _tn = time.time()
-                        _by_sig = S.setdefault("_last_scan_sig_by_asset", {})
-                        _by_ts = S.setdefault("_last_scan_sig_ts_by_asset", {})
-                        _prev = _by_sig.get(a)
-                        _prev_t = float(_by_ts.get(a, 0) or 0)
-                        if _prev != _sig or _tn - _prev_t >= 12.0:
+                        if _tn - S.get("_last_scan_sig_ts", 0) >= 12 or S.get("_last_scan_sig") != _sig:
                             log.info(f"🔍 {a}: {d.upper()} score={score}")
-                            _by_sig[a] = _sig
-                            _by_ts[a] = _tn
+                            S["_last_scan_sig_ts"] = _tn
+                            S["_last_scan_sig"] = _sig
                         if d != "wait" and score > best_score:
                             # تجنب تكرار نفس الزوج إذا وجد بديل بنفس القوة
                             if score > best_score or a != last_used_asset:
@@ -2622,16 +2618,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     direction    = best_dir
                     chosen_asset = best_asset
                     S["_wait_streak"] = 0
-                    _best_key = (chosen_asset, direction, best_score)
-                    _tnb = time.time()
-                    if _best_key != S.get("_last_best_pair_logged") or _tnb - float(
-                        S.get("_last_best_pair_log_ts", 0) or 0
-                    ) >= 30.0:
-                        log.info(
-                            f"🏆 أفضل زوج: {chosen_asset} → {direction.upper()} (score={best_score})"
-                        )
-                        S["_last_best_pair_logged"] = _best_key
-                        S["_last_best_pair_log_ts"] = _tnb
+                    log.info(f"🏆 أفضل زوج: {chosen_asset} → {direction.upper()} (score={best_score})")
                 elif not any_candles:
                     _now = time.time()
                     if _now - S.get("_last_candle_warn_ts", 0) >= 15:
@@ -2728,17 +2715,10 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     f"⏸️ تخطّي الإشارة: نافذة الدخول خارج المدى "
                     f"({eff_left:.1f}s، المطلوب {entry_window_min_sec:.0f}-{entry_window_max_sec:.0f}s)"
                 )
-                _sk = time.time()
-                if _sk - float(S.get("_last_skip_entry_log_ts", 0) or 0) >= 15.0:
-                    log.info(
-                        "⏸️ skip entry: left_this=%.2fs left_next=%.2fs eff=%.2fs (required %.0f-%.0fs)",
-                        sec_left_this,
-                        sec_left_next,
-                        eff_left,
-                        entry_window_min_sec,
-                        entry_window_max_sec,
-                    )
-                    S["_last_skip_entry_log_ts"] = _sk
+                log.info(
+                    "⏸️ skip entry: left_this=%.2fs left_next=%.2fs eff=%.2fs (required %.0f-%.0fs)",
+                    sec_left_this, sec_left_next, eff_left, entry_window_min_sec, entry_window_max_sec
+                )
                 stop.wait(timeout=1.0)
                 continue
 
