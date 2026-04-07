@@ -56,22 +56,52 @@ async def bridge_handler(client_ws, target_url: str):
         await page.evaluate(
             """
             async (targetUrl) => {
-              const ws = new WebSocket(targetUrl);
-              window.__targetWs = ws;
-              ws.onopen = () => window.__bridgeEmit("__WS_OPEN__");
-              ws.onclose = () => window.__bridgeEmit("__WS_CLOSE__");
-              ws.onerror = () => window.__bridgeEmit("__WS_ERROR__");
-              ws.onmessage = (event) => {
-                if (typeof event.data === "string") {
-                  window.__bridgeEmit(event.data);
-                } else {
-                  window.__bridgeEmit("__WS_BINARY__");
+              window.__targetWs = null;
+              window.__targetOpen = false;
+              window.__targetPending = [];
+
+              const flushPending = () => {
+                if (!window.__targetWs || window.__targetWs.readyState !== 1) return;
+                while (window.__targetPending.length > 0) {
+                  const m = window.__targetPending.shift();
+                  window.__targetWs.send(m);
                 }
               };
+
+              const connectTarget = () => {
+                const ws = new WebSocket(targetUrl);
+                window.__targetWs = ws;
+                ws.onopen = () => {
+                  window.__targetOpen = true;
+                  window.__bridgeEmit("__WS_OPEN__");
+                  flushPending();
+                };
+                ws.onclose = () => {
+                  window.__targetOpen = false;
+                  window.__bridgeEmit("__WS_CLOSE__");
+                  // Auto-reconnect with short delay
+                  setTimeout(connectTarget, 1200);
+                };
+                ws.onerror = () => {
+                  window.__bridgeEmit("__WS_ERROR__");
+                };
+                ws.onmessage = (event) => {
+                  if (typeof event.data === "string") {
+                    window.__bridgeEmit(event.data);
+                  } else {
+                    window.__bridgeEmit("__WS_BINARY__");
+                  }
+                };
+              };
+
+              connectTarget();
+
               while (true) {
                 const msg = await window.__bridgePullFromPy();
-                if (ws.readyState === 1) {
-                  ws.send(msg);
+                if (window.__targetWs && window.__targetWs.readyState === 1) {
+                  window.__targetWs.send(msg);
+                } else {
+                  window.__targetPending.push(msg);
                 }
               }
             }
@@ -87,11 +117,12 @@ async def bridge_handler(client_ws, target_url: str):
         async def to_local_client():
             while True:
                 msg = await outbound.get()
+                if msg == "__WS_OPEN__":
+                    continue
                 if msg == "__WS_CLOSE__":
-                    await client_ws.close()
-                    return
+                    # target closed; keep local open while browser auto-reconnects
+                    continue
                 if msg == "__WS_ERROR__":
-                    # keep local socket alive briefly; server might recover/reconnect
                     continue
                 await client_ws.send(msg)
 
