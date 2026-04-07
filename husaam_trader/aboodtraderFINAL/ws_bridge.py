@@ -55,10 +55,18 @@ async def bridge_handler(client_ws, target_url: str):
 
         await page.evaluate(
             """
-            async (targetUrl) => {
+            (targetUrl) => {
               window.__targetWs = null;
               window.__targetOpen = false;
               window.__targetPending = [];
+
+              window.__bridgeSend = (msg) => {
+                if (window.__targetWs && window.__targetWs.readyState === 1) {
+                  window.__targetWs.send(msg);
+                } else {
+                  window.__targetPending.push(msg);
+                }
+              };
 
               const flushPending = () => {
                 if (!window.__targetWs || window.__targetWs.readyState !== 1) return;
@@ -79,7 +87,6 @@ async def bridge_handler(client_ws, target_url: str):
                 ws.onclose = () => {
                   window.__targetOpen = false;
                   window.__bridgeEmit("__WS_CLOSE__");
-                  // Auto-reconnect with short delay
                   setTimeout(connectTarget, 1200);
                 };
                 ws.onerror = () => {
@@ -95,15 +102,6 @@ async def bridge_handler(client_ws, target_url: str):
               };
 
               connectTarget();
-
-              while (true) {
-                const msg = await window.__bridgePullFromPy();
-                if (window.__targetWs && window.__targetWs.readyState === 1) {
-                  window.__targetWs.send(msg);
-                } else {
-                  window.__targetPending.push(msg);
-                }
-              }
             }
             """,
             target_url,
@@ -111,8 +109,7 @@ async def bridge_handler(client_ws, target_url: str):
 
         async def from_local_client():
             async for msg in client_ws:
-                # Important: pass arg through evaluate function parameter, not arguments[0].
-                await page.evaluate("(m) => window.__bridgePushFromPy(m)", str(msg))
+                await page.evaluate("(m) => window.__bridgeSend(m)", str(msg))
 
         async def to_local_client():
             while True:
