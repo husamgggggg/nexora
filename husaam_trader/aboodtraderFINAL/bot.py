@@ -513,6 +513,16 @@ def _ensure_playwright_bridge(target_ws_url: str):
         target_ws_url,
     ]
     try:
+        _bp = globals().get("QX_HTTP_PROXIES")
+        _bridge_px = ""
+        if isinstance(_bp, dict):
+            _bridge_px = str(_bp.get("https") or _bp.get("http") or "").strip()
+        if _bridge_px:
+            cmd.extend(["--proxy-url", _bridge_px])
+            log.info("Playwright bridge: تمرير بروكسي pyquotex إلى Chromium (تطابق IP مع جلسة الدخول)")
+    except Exception:
+        pass
+    try:
         logs_dir = os.path.join(os.path.dirname(bridge_file), "logs")
         os.makedirs(logs_dir, exist_ok=True)
         bridge_log_path = os.path.join(logs_dir, "ws_bridge.log")

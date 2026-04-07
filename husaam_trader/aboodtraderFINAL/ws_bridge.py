@@ -4,31 +4,102 @@
 
 مهم: Socket.IO قد يرسل إطارات نصية أو ثنائية؛ تحويل الثنائي إلى نص يفسد البروتوكول.
 نمرّر النص كما هو، والثنائي كـ base64 بين JS وPython ثم نعيد bytes إلى العميل المحلي.
+
+إن كان تسجيل الدخول عبر pyquotex يستخدم بروكسي (QUOTEX_PROXY_URL وغيره) فلا بد أن يمرّ
+نفس البروكسي إلى Chromium هنا؛ وإلا يخرج الـ WebSocket من IP مختلف وقد يرفضه السيرفر
+(يظهر لدى العميل: connection rejected).
+
+يُمرَّر عبر ``--proxy-url`` من bot.py أو من البيئة:
+``QUOTEX_WS_BRIDGE_PROXY`` ثم ``QUOTEX_PROXY_URL`` ثم ``HTTPS_PROXY`` / ``HTTP_PROXY``.
 """
 import argparse
 import asyncio
 import base64
+import os
 import traceback
+import urllib.parse
+from typing import Any, Dict, Optional
 
 import websockets
 from playwright.async_api import async_playwright
 
 
-async def bridge_handler(client_ws, target_url: str):
+def _resolve_proxy_url(cli_value: str) -> str:
+    s = (cli_value or "").strip().strip('"').strip("'")
+    if s:
+        return s
+    for key in (
+        "QUOTEX_WS_BRIDGE_PROXY",
+        "QUOTEX_PROXY_URL",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "ALL_PROXY",
+        "ZENROWS_PROXY_URL",
+    ):
+        v = (os.environ.get(key) or "").strip().strip('"').strip("'")
+        if v:
+            return v
+    return ""
+
+
+def _playwright_proxy_config(proxy_url: str) -> Optional[Dict[str, Any]]:
+    """يحوّل http(s):// أو socks5:// إلى صيغة Playwright ``proxy``."""
+    raw = (proxy_url or "").strip().strip('"').strip("'")
+    if not raw:
+        return None
+    try:
+        u = urllib.parse.urlparse(raw)
+    except Exception:
+        return None
+    if not u.hostname:
+        return None
+    port = u.port
+    if port is None:
+        tail = (u.netloc or "").split("@")[-1]
+        if ":" in tail:
+            maybe = tail.rsplit(":", 1)[-1]
+            if maybe.isdigit():
+                port = int(maybe)
+    if not port:
+        return None
+    scheme = (u.scheme or "http").lower()
+    if scheme.startswith("socks5"):
+        server = f"socks5://{u.hostname}:{port}"
+    elif scheme.startswith("socks4"):
+        server = f"socks4://{u.hostname}:{port}"
+    else:
+        server = f"http://{u.hostname}:{port}"
+    cfg: dict = {"server": server}
+    if u.username is not None and str(u.username) != "":
+        cfg["username"] = urllib.parse.unquote(u.username)
+        cfg["password"] = urllib.parse.unquote(u.password or "")
+    return cfg
+
+
+async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
     outbound = asyncio.Queue()
+    resolved_proxy = _resolve_proxy_url(proxy_url)
+    proxy_cfg = _playwright_proxy_config(resolved_proxy)
+    if proxy_cfg:
+        print(f"[Bridge] Playwright context proxy: {proxy_cfg.get('server')}", flush=True)
+    else:
+        print("[Bridge] Playwright context: no proxy (same IP as VPS — may mismatch pyquotex login IP)", flush=True)
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
         )
-        context = await browser.new_context(
-            user_agent=(
+        ctx_kw: Dict[str, Any] = {
+            "user_agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/122.0.0.0 Safari/537.36"
             )
-        )
+        }
+        if proxy_cfg:
+            ctx_kw["proxy"] = proxy_cfg
+        context = await browser.new_context(**ctx_kw)
         page = await context.new_page()
         await page.goto("https://qxbroker.com", wait_until="domcontentloaded")
 
@@ -159,10 +230,13 @@ async def bridge_handler(client_ws, target_url: str):
                 kind, data = item
                 if kind == "str":
                     if data == "__WS_OPEN__":
+                        print("[Bridge] upstream Quotex WebSocket OPEN", flush=True)
                         continue
                     if data == "__WS_CLOSE__":
+                        print("[Bridge] upstream Quotex WebSocket CLOSE", flush=True)
                         continue
                     if data == "__WS_ERROR__":
+                        print("[Bridge] upstream Quotex WebSocket ERROR", flush=True)
                         continue
                     if data == "__WS_BRIDGE_ERR__":
                         continue
@@ -191,11 +265,16 @@ async def main():
     parser.add_argument("--listen-host", default="127.0.0.1")
     parser.add_argument("--listen-port", type=int, default=8765)
     parser.add_argument("--target-url", required=True)
+    parser.add_argument(
+        "--proxy-url",
+        default="",
+        help="نفس بروكسي pyquotex (http/https/socks5) لتطابق IP جلسة الـ WebSocket",
+    )
     args = parser.parse_args()
 
     async def handler(ws, *rest):
         try:
-            await bridge_handler(ws, args.target_url)
+            await bridge_handler(ws, args.target_url, proxy_url=args.proxy_url)
         except Exception as e:
             print(f"[Bridge] handler crash: {e}")
             raise
