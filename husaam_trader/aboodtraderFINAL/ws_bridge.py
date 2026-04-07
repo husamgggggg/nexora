@@ -81,11 +81,18 @@ async def bridge_handler(client_ws, target_url: str):
 
         async def from_local_client():
             async for msg in client_ws:
-                await page.evaluate("window.__bridgePushFromPy(arguments[0])", str(msg))
+                # Important: pass arg through evaluate function parameter, not arguments[0].
+                await page.evaluate("(m) => window.__bridgePushFromPy(m)", str(msg))
 
         async def to_local_client():
             while True:
                 msg = await outbound.get()
+                if msg == "__WS_CLOSE__":
+                    await client_ws.close()
+                    return
+                if msg == "__WS_ERROR__":
+                    # keep local socket alive briefly; server might recover/reconnect
+                    continue
                 await client_ws.send(msg)
 
         try:
