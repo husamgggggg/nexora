@@ -58,6 +58,27 @@ except ImportError as e:
 _HUSAAM_WS_LAST: dict = {}
 
 
+def _install_pyquotex_ws_on_message_fix():
+    """
+    pyquotex يستدعي message.get() بعد json.loads حتى لو كان message نصًا — يسبب
+    'str' object has no attribute 'get' (ظهر مع Playwright bridge / تغيّر شكل الرسائل).
+    """
+    if not QX:
+        return
+    try:
+        from pyquotex.ws.client import WebsocketClient
+        from nexora_pyquotex_ws_on_message import on_message as _fixed_on_message
+    except ImportError as e:
+        logging.getLogger("NexoraTrade").warning("تعذر تطبيق تصحيح pyquotex on_message: %s", e)
+        return
+    if getattr(WebsocketClient.on_message, "_nexora_pyquotex_on_message_fix", False):
+        return
+    WebsocketClient.on_message = _fixed_on_message
+
+
+_install_pyquotex_ws_on_message_fix()
+
+
 def _ws_history_asset_matches(api, msg_asset, current_asset) -> bool:
     """السيرفر قد يرسل asset كرقم والجلسة EURUSD_otc — المكتبة تقارن بـ == فتفشل."""
     if msg_asset is None or current_asset is None:
