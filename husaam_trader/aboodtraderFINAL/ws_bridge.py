@@ -136,8 +136,15 @@ async def main():
     parser.add_argument("--target-url", required=True)
     args = parser.parse_args()
 
-    async def handler(ws):
-        await bridge_handler(ws, args.target_url)
+    async def handler(ws, *rest):
+        # Compatible with both websockets APIs:
+        # - new versions: handler(ws)
+        # - old versions: handler(ws, path)
+        try:
+            await bridge_handler(ws, args.target_url)
+        except Exception as e:
+            print(f"[Bridge] handler crash: {e}")
+            raise
 
     async with websockets.serve(handler, args.listen_host, args.listen_port):
         await asyncio.Future()

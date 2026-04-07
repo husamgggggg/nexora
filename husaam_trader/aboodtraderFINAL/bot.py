@@ -486,11 +486,15 @@ def _ensure_playwright_bridge(target_ws_url: str):
         target_ws_url,
     ]
     try:
+        logs_dir = os.path.join(os.path.dirname(bridge_file), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        bridge_log_path = os.path.join(logs_dir, "ws_bridge.log")
+        bridge_log = open(bridge_log_path, "a", encoding="utf-8")
         _PW_BRIDGE_PROC = subprocess.Popen(
             cmd,
             cwd=os.path.dirname(bridge_file),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=bridge_log,
+            stderr=bridge_log,
         )
         _PW_BRIDGE_PORT = port
     except Exception as e:
