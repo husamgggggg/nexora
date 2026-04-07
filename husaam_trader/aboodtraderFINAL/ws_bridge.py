@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+import traceback
 from playwright.async_api import async_playwright
 import websockets
 
@@ -109,7 +110,18 @@ async def bridge_handler(client_ws, target_url: str):
 
         async def from_local_client():
             async for msg in client_ws:
-                await page.evaluate("(m) => window.__bridgeSend(m)", str(msg))
+                try:
+                    if isinstance(msg, (bytes, bytearray)):
+                        try:
+                            payload = msg.decode("utf-8")
+                        except Exception:
+                            payload = msg.decode("latin-1", errors="ignore")
+                    else:
+                        payload = str(msg)
+                    await page.evaluate("(m) => window.__bridgeSend(m)", payload)
+                except Exception:
+                    print("[Bridge] from_local_client send failed")
+                    print(traceback.format_exc())
 
         async def to_local_client():
             while True:
@@ -121,7 +133,12 @@ async def bridge_handler(client_ws, target_url: str):
                     continue
                 if msg == "__WS_ERROR__":
                     continue
-                await client_ws.send(msg)
+                try:
+                    await client_ws.send(msg)
+                except Exception:
+                    print("[Bridge] to_local_client send failed")
+                    print(traceback.format_exc())
+                    return
 
         try:
             await asyncio.gather(from_local_client(), to_local_client())
