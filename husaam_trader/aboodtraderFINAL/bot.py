@@ -474,14 +474,17 @@ def _pick_free_port() -> int:
 
 
 def _wait_port_open(host: str, port: int, timeout_sec: float = 8.0) -> bool:
+    """
+    يتحقق أن المنفذ يقبل اتصال TCP فقط.
+    لا ترسل GET عادياً: خادم websockets يتوقع Upgrade: websocket وإلا InvalidUpgrade
+    (missing Connection header) وقد يفسد أول جلسة bridge.
+    """
     end = time.time() + timeout_sec
     while time.time() < end:
         try:
-            # Send minimal HTTP request to avoid noisy websocket EOF logs.
             with socket.create_connection((host, port), timeout=1.0) as s:
-                s.sendall(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
                 try:
-                    s.recv(32)
+                    s.shutdown(socket.SHUT_RDWR)
                 except Exception:
                     pass
                 return True

@@ -101,7 +101,32 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
             ctx_kw["proxy"] = proxy_cfg
         context = await browser.new_context(**ctx_kw)
         page = await context.new_page()
-        await page.goto("https://qxbroker.com", wait_until="domcontentloaded")
+        # عبر بروكسي سكني قد يتأخر domcontentloaded دقائق؛ «commit» أسرع. بدون صفحة يصلح Origin أحياناً.
+        nav_url = (os.environ.get("QUOTEX_BRIDGE_NAV_URL") or "https://qxbroker.com").strip()
+        skip_nav = os.environ.get("QUOTEX_BRIDGE_SKIP_PAGE_NAV", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        try:
+            nav_timeout = int(os.environ.get("QUOTEX_BRIDGE_NAV_TIMEOUT_MS", "90000") or 90000)
+        except ValueError:
+            nav_timeout = 90000
+        nav_timeout = max(5000, min(nav_timeout, 300000))
+        if skip_nav or not nav_url:
+            await page.goto("about:blank")
+            print("[Bridge] page: about:blank (skip nav أو URL فارغ)", flush=True)
+        else:
+            try:
+                await page.goto(nav_url, wait_until="commit", timeout=nav_timeout)
+                print(f"[Bridge] page: committed {nav_url}", flush=True)
+            except Exception as nav_err:
+                print(
+                    f"[Bridge] page.goto failed ({nav_err}) — fallback about:blank",
+                    flush=True,
+                )
+                await page.goto("about:blank")
 
         async def emit_to_python(payload):
             """payload من JS: {k:'t', d: str} أو {k:'b', d: base64}"""
