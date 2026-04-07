@@ -416,12 +416,27 @@ def establish_websocket_with_stealth(proxy=None):
             return ws
     except Exception as e:
         log.warning("فشلت المحاولة البرمجية الأولى: %s", e)
-    try:
-        import asyncio as _a
+    # تجنّب RuntimeWarning عند وجود loop شغال: شغّل Playwright bridge في Thread مستقل.
+    if os.getenv("ENABLE_PLAYWRIGHT_BRIDGE", "").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            def _run_bridge_bg():
+                try:
+                    asyncio.run(
+                        playwright_websocket_bridge(
+                            "wss://quotex.io/some/ws",
+                            lambda x: log.debug("bridge: %s", x),
+                        )
+                    )
+                except Exception as e:
+                    log.warning("Playwright bridge فشل: %s", e)
 
-        _a.run(playwright_websocket_bridge("wss://quotex.io/some/ws", lambda x: log.debug("bridge: %s", x)))
-    except Exception:
-        pass
+            t = Thread(target=_run_bridge_bg, daemon=True, name="playwright-ws-bridge")
+            t.start()
+            log.info("تم تشغيل Playwright bridge في الخلفية.")
+        except Exception as e:
+            log.warning("تعذر تشغيل Playwright bridge: %s", e)
+    else:
+        log.info("Playwright bridge معطّل (فعّله عبر ENABLE_PLAYWRIGHT_BRIDGE=1 إذا أردت).")
     return None
 
 
