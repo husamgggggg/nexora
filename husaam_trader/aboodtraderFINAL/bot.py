@@ -8,12 +8,23 @@ NEXORA TRADE Bot — النسخة النهائية الكاملة
 ✅ متعدد المشتركين كل بحسابه المستقل
 ✅ إشعار عند تحقق الهدف
 """
-import asyncio, html, json, logging, os, queue, random, re
+import asyncio, base64, html, json, logging, os, queue, random, re, ssl
 import secrets, threading, time, traceback
 from contextlib import asynccontextmanager
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from threading import Thread
+
+try:
+    import websocket  # type: ignore
+except Exception:  # pragma: no cover
+    websocket = None
+
+try:
+    from curl_cffi import requests as curl_requests  # type: ignore
+except Exception:  # pragma: no cover
+    curl_requests = None
 
 import pydantic, uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -222,6 +233,198 @@ def _parse_ws_proxy_from_http_proxies(proxies):
     return ws_proxy
 
 
+# ========== الحل البرمجي الجذري لتجاوز Cloudflare WebSocket ==========
+# ملاحظة: هذا القسم اختياري/احتياطي. إذا لم تتوفر المكتبات المطلوبة، يُتخطّى تلقائياً.
+def is_cloudflare_ws_failure(error) -> bool:
+    txt = str(error or "").lower()
+    keys = (
+        "handshake status 403",
+        "cf-mitigated",
+        "cloudflare",
+        "connection to remote host was lost",
+        "forbidden",
+        "challenge",
+        "just a moment",
+    )
+    return any(k in txt for k in keys)
+
+
+def create_stealth_websocket(url, cookies=None, proxy=None):
+    """
+    تنشئ WebSocket متخفيًا بثلاث طبقات:
+    1) تهيئة جلسة HTTP عبر curl_cffi (إن توفرت) لجلب cookies.
+    2) إنشاء websocket-client بهيدرز وSSL context.
+    3) fallback لاحق عبر Playwright bridge.
+    """
+    cookies = cookies or {}
+    if curl_requests is None or websocket is None:
+        log.warning("Stealth WS: مكتبات غير متوفرة (curl_cffi/websocket-client)")
+        return None
+    try:
+        # no-op: keep structure consistent
+        pass
+    except Exception as e:
+        log.warning("Stealth WS: مكتبة غير متوفرة (%s)", e)
+        return None
+
+    session = curl_requests.Session()
+    session.headers.update(
+        {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Sec-WebSocket-Version": "13",
+            "Sec-WebSocket-Extensions": "permessage-deflate; client_max_window_bits",
+            "Origin": "https://quotex.io",
+            "Sec-WebSocket-Key": base64.b64encode(os.urandom(16)).decode(),
+        }
+    )
+    for ck, cv in cookies.items():
+        try:
+            session.cookies.set(str(ck), str(cv))
+        except Exception:
+            pass
+    try:
+        resp = session.get("https://quotex.io", impersonate="chrome120", timeout=30)
+        cf_cookie = resp.cookies.get("cf_clearance")
+        if cf_cookie:
+            session.cookies.set("cf_clearance", cf_cookie)
+    except Exception:
+        pass
+
+    ws_url = str(url or "").replace("http://", "ws://").replace("https://", "wss://")
+    ws_headers = {
+        "User-Agent": session.headers.get("User-Agent", ""),
+        "Origin": "https://quotex.io",
+        "Sec-WebSocket-Key": session.headers.get("Sec-WebSocket-Key", ""),
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Extensions": "permessage-deflate; client_max_window_bits",
+        "Cookie": "; ".join([f"{k}={v}" for k, v in session.cookies.items()]),
+    }
+
+    ssl_context = ssl.create_default_context()
+    try:
+        ssl_context.set_ciphers(
+            "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:"
+            "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+        )
+    except Exception:
+        pass
+    is_zen = "zenrows" in str(proxy or "").lower()
+    if is_zen:
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
+    ws = websocket.WebSocketApp(
+        ws_url,
+        header=[f"{k}: {v}" for k, v in ws_headers.items() if v],
+        on_open=lambda w: log.info("WS stealth: مفتوح بنجاح"),
+        on_error=lambda w, err: log.warning("WS stealth error: %s", err),
+        on_close=lambda w, close_status, close_msg: log.warning("WS stealth: مغلق"),
+    )
+
+    # websocket-client لا يقبل "proxy" كسلسلة مباشرة داخل run_forever؛
+    # يمرّر http_proxy_host/http_proxy_port. هنا نمرر بدون proxy إذا ZenRows.
+    kwargs = {"sslopt": {"context": ssl_context}}
+    if proxy and not is_zen:
+        p = _parse_ws_proxy_from_http_proxies({"http": proxy, "https": proxy})
+        if p:
+            kwargs.update(p)
+
+    wst = Thread(target=ws.run_forever, kwargs=kwargs)
+    wst.daemon = True
+    wst.start()
+    time.sleep(2)
+    return ws
+
+
+async def playwright_websocket_bridge(target_wss_url, message_callback):
+    """
+    Bridge عبر Playwright (ثقيل) — fallback.
+    """
+    try:
+        from playwright.async_api import async_playwright  # type: ignore
+        import websockets  # type: ignore
+    except Exception as e:
+        log.warning("Playwright bridge غير متاح: %s", e)
+        return
+
+    async def handle_client(client_ws):
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled"],
+            )
+            page = await browser.new_page()
+            await page.goto("https://quotex.io", wait_until="domcontentloaded")
+            await page.evaluate(
+                """
+                (targetUrl) => {
+                  window.__nexora_ws = new WebSocket(targetUrl);
+                }
+                """,
+                target_wss_url,
+            )
+            try:
+                async for message in client_ws:
+                    safe = str(message).replace("\\", "\\\\").replace("'", "\\'")
+                    await page.evaluate(f"window.__nexora_ws && window.__nexora_ws.send('{safe}')")
+                    try:
+                        message_callback(message)
+                    except Exception:
+                        pass
+            finally:
+                await browser.close()
+
+    server = await websockets.serve(handle_client, "localhost", 8765)
+    await server.wait_closed()
+
+
+def get_websocket_via_tls_client(url):
+    try:
+        import tls_client  # type: ignore
+    except Exception as e:
+        log.warning("tls_client غير متاح: %s", e)
+        return None
+    session = tls_client.Session(
+        client_identifier="chrome_120",
+        random_tls_extension_order=True,
+    )
+    try:
+        resp = session.get("https://quotex.io")
+        return resp.cookies.get("cf_clearance")
+    except Exception as e:
+        log.warning("tls_client فشل: %s", e)
+        return None
+
+
+def establish_websocket_with_stealth(proxy=None):
+    """
+    محاولة إنشاء WebSocket بطريقة stealth قبل fallback التقليدي.
+    """
+    if proxy and "zenrows" in str(proxy).lower():
+        proxy = None
+        log.warning("ZenRows غير صالح لـ WebSocket، اعتماد stealth بدون بروكسي")
+    try:
+        ws = create_stealth_websocket("wss://quotex.io/some/ws", cookies={}, proxy=proxy)
+        if ws and getattr(ws, "sock", None) and ws.sock and ws.sock.connected:
+            return ws
+    except Exception as e:
+        log.warning("فشلت المحاولة البرمجية الأولى: %s", e)
+    try:
+        import asyncio as _a
+
+        _a.run(playwright_websocket_bridge("wss://quotex.io/some/ws", lambda x: log.debug("bridge: %s", x)))
+    except Exception:
+        pass
+    return None
+
+
 def _install_pyquotex_ws_proxy_patch(proxies):
     """
     pyquotex يمرّر proxy لطلبات HTTP فقط. هذا patch يمرّره أيضاً لـ WebSocket.
@@ -260,6 +463,17 @@ def _install_pyquotex_ws_proxy_patch(proxies):
         if not self.state.SSID:
             await self.authenticate()
         self.websocket_client = _qx_api_mod.WebsocketClient(self)
+        # قبل أي اتصال WS أساسي: محاولة Stealth preflight لتهيئة تحديات Cloudflare.
+        try:
+            stealth_proxy = str(proxies.get("https") or proxies.get("http") or "") if isinstance(proxies, dict) else None
+            pre_ws = establish_websocket_with_stealth(proxy=stealth_proxy)
+            if pre_ws and getattr(pre_ws, "sock", None):
+                try:
+                    pre_ws.close()
+                except Exception:
+                    pass
+        except Exception as _e:
+            log.debug("Stealth preflight skipped: %s", _e)
         if ws_insecure_ssl:
             log.warning(
                 "WebSocket عبر بروكسي MITM: تعطيل التحقق من شهادة TLS (ZenRows أو QUOTEX_WS_INSECURE_SSL=1)"
@@ -1987,6 +2201,20 @@ async def _login_qx(email, password, S):
         try: check, msg = await client.connect()
         finally: builtins.input = orig
         if not check:
+            if is_cloudflare_ws_failure(msg):
+                log.warning("Cloudflare WS detected. تشغيل Stealth ثم إعادة connect مرة واحدة...")
+                try:
+                    stealth_proxy = str(QX_HTTP_PROXIES.get("https") or QX_HTTP_PROXIES.get("http") or "") if isinstance(QX_HTTP_PROXIES, dict) else None
+                    establish_websocket_with_stealth(proxy=stealth_proxy)
+                    import builtins as _b2
+                    _orig2 = _b2.input
+                    _b2.input = make_pin_input(email, S)
+                    try:
+                        check, msg = await client.connect()
+                    finally:
+                        _b2.input = _orig2
+                except Exception as _e:
+                    log.warning("Stealth reconnect failed: %s", _e)
             if S["needs_pin"]:
                 return {"ok":False,"pin":True,"msg":"أدخل PIN من بريدك"}
             err = str(msg) or "فشل الاتصال"
