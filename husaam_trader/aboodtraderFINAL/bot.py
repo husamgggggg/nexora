@@ -243,6 +243,16 @@ def _install_pyquotex_ws_proxy_patch(proxies):
     if getattr(QuotexAPI.start_websocket, "_nexora_ws_proxy_patch", False):
         return
 
+    _ws_h = (ws_proxy.get("http_proxy_host") or "").lower()
+    _insecure_env = os.getenv("QUOTEX_WS_INSECURE_SSL", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    # ZenRows (ومثله) يمرّر TLS عبر وسيط؛ مثل عيّنة Playground التي تستخدم verify=False.
+    ws_insecure_ssl = _insecure_env or "zenrows.com" in _ws_h
+
     async def _start_websocket_with_proxy(self):
         self.state.check_websocket_if_connect = None
         self.state.check_websocket_if_error = False
@@ -250,6 +260,23 @@ def _install_pyquotex_ws_proxy_patch(proxies):
         if not self.state.SSID:
             await self.authenticate()
         self.websocket_client = _qx_api_mod.WebsocketClient(self)
+        if ws_insecure_ssl:
+            log.warning(
+                "WebSocket عبر بروكسي MITM: تعطيل التحقق من شهادة TLS (ZenRows أو QUOTEX_WS_INSECURE_SSL=1)"
+            )
+            sslopt = {
+                "check_hostname": False,
+                "cert_reqs": _qx_api_mod.ssl.CERT_NONE,
+            }
+        else:
+            sslopt = {
+                "check_hostname": True,
+                "cert_reqs": _qx_api_mod.ssl.CERT_REQUIRED,
+                "ca_certs": _qx_api_mod.cacert,
+                "context": _qx_api_mod.ssl_context,
+            }
+        if _qx_api_mod.platform.system() == "Linux":
+            sslopt["ssl_version"] = _qx_api_mod.ssl.PROTOCOL_TLS
         payload = {
             "suppress_origin": True,
             "ping_interval": 24,
@@ -257,15 +284,8 @@ def _install_pyquotex_ws_proxy_patch(proxies):
             "ping_payload": "2",
             "origin": self.https_url,
             "host": f"ws2.{self.host}",
-            "sslopt": {
-                "check_hostname": True,
-                "cert_reqs": _qx_api_mod.ssl.CERT_REQUIRED,
-                "ca_certs": _qx_api_mod.cacert,
-                "context": _qx_api_mod.ssl_context,
-            },
+            "sslopt": sslopt,
         }
-        if _qx_api_mod.platform.system() == "Linux":
-            payload["sslopt"]["ssl_version"] = _qx_api_mod.ssl.PROTOCOL_TLS
 
         # تمرير بروكسي WebSocket بنفس إعدادات HTTPS proxy.
         payload.update(ws_proxy)
