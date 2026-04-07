@@ -169,7 +169,119 @@ def _init_zenrows_for_pyquotex():
         return None
 
 
+def _parse_ws_proxy_from_http_proxies(proxies):
+    """
+    يحوّل proxies الخاصة بـ HTTP إلى kwargs مفهومة من websocket-client.
+    """
+    if not isinstance(proxies, dict):
+        return {}
+    raw = str(proxies.get("https") or proxies.get("http") or "").strip()
+    if not raw:
+        return {}
+    try:
+        u = urllib.parse.urlparse(raw)
+    except Exception:
+        return {}
+    if not u.hostname or not u.port:
+        return {}
+
+    scheme = (u.scheme or "http").lower()
+    if scheme.startswith("socks5"):
+        ptype = "socks5"
+    elif scheme.startswith("socks4"):
+        ptype = "socks4"
+    else:
+        ptype = "http"
+
+    ws_proxy = {
+        "http_proxy_host": u.hostname,
+        "http_proxy_port": int(u.port),
+        "proxy_type": ptype,
+    }
+    user = urllib.parse.unquote(u.username) if u.username else None
+    pwd = urllib.parse.unquote(u.password) if u.password else None
+    if user:
+        ws_proxy["http_proxy_auth"] = (user, pwd or "")
+    return ws_proxy
+
+
+def _install_pyquotex_ws_proxy_patch(proxies):
+    """
+    pyquotex يمرّر proxy لطلبات HTTP فقط. هذا patch يمرّره أيضاً لـ WebSocket.
+    """
+    if not QX:
+        return
+    ws_proxy = _parse_ws_proxy_from_http_proxies(proxies)
+    if not ws_proxy:
+        log.warning("لم يتم العثور على WS proxy صالح (سيتم الاتصال بـ Quotex مباشرة).")
+        return
+    try:
+        import pyquotex.api as _qx_api_mod
+    except Exception as e:
+        log.warning("تعذر تحميل pyquotex.api لتفعيل WS proxy patch: %s", e)
+        return
+    QuotexAPI = getattr(_qx_api_mod, "QuotexAPI", None)
+    if QuotexAPI is None:
+        return
+    if getattr(QuotexAPI.start_websocket, "_nexora_ws_proxy_patch", False):
+        return
+
+    async def _start_websocket_with_proxy(self):
+        self.state.check_websocket_if_connect = None
+        self.state.check_websocket_if_error = False
+        self.state.websocket_error_reason = None
+        if not self.state.SSID:
+            await self.authenticate()
+        self.websocket_client = _qx_api_mod.WebsocketClient(self)
+        payload = {
+            "suppress_origin": True,
+            "ping_interval": 24,
+            "ping_timeout": 20,
+            "ping_payload": "2",
+            "origin": self.https_url,
+            "host": f"ws2.{self.host}",
+            "sslopt": {
+                "check_hostname": True,
+                "cert_reqs": _qx_api_mod.ssl.CERT_REQUIRED,
+                "ca_certs": _qx_api_mod.cacert,
+                "context": _qx_api_mod.ssl_context,
+            },
+        }
+        if _qx_api_mod.platform.system() == "Linux":
+            payload["sslopt"]["ssl_version"] = _qx_api_mod.ssl.PROTOCOL_TLS
+
+        # تمرير بروكسي WebSocket بنفس إعدادات HTTPS proxy.
+        payload.update(ws_proxy)
+
+        self.websocket_thread = _qx_api_mod.threading.Thread(
+            target=self.websocket.run_forever, kwargs=payload
+        )
+        self.websocket_thread.daemon = True
+        self.websocket_thread.start()
+        while True:
+            if self.state.check_websocket_if_error:
+                return False, self.state.websocket_error_reason
+            if self.state.check_websocket_if_connect == 0:
+                return False, "Websocket connection closed."
+            if self.state.check_websocket_if_connect == 1:
+                return True, "Websocket connected successfully!!!"
+            if self.state.check_rejected_connection == 1:
+                self.state.SSID = None
+                return True, "Websocket Token Rejected."
+            await asyncio.sleep(0.1)
+
+    _start_websocket_with_proxy._nexora_ws_proxy_patch = True
+    QuotexAPI.start_websocket = _start_websocket_with_proxy
+    log.info(
+        "تم تفعيل WS proxy patch لـ pyquotex: %s:%s (%s)",
+        ws_proxy.get("http_proxy_host"),
+        ws_proxy.get("http_proxy_port"),
+        ws_proxy.get("proxy_type"),
+    )
+
+
 QX_HTTP_PROXIES = _init_zenrows_for_pyquotex()
+_install_pyquotex_ws_proxy_patch(QX_HTTP_PROXIES)
 
 USERS_F  = "data/users.json"
 ADMIN_PW = os.getenv("ADMIN_PW", "Admin@2024")
