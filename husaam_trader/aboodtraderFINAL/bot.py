@@ -1789,7 +1789,9 @@ async def _start_price_stream(client, asset):
             return
         keys = _quotex_tick_keys(client, asset)
         k0 = keys[0]
-        client.start_candles_stream(k0, 0)
+        # pyquotex Stable.period_default=60؛ الفترة 0 تُرسل للسيرفر كاشتراك غير صالح → لا تيكات ولا شموع حية.
+        stream_period = max(1, int(os.getenv("QUOTEX_STREAM_PERIOD_SEC", str(_HUSAAM_EMA10_CANDLE_SECS)) or _HUSAAM_EMA10_CANDLE_SECS))
+        client.start_candles_stream(k0, stream_period)
         # المكتبة تُلحق التيك بـ message[0][0]؛ إن اختلف المفتاح عن المشترك يحدث KeyError ويُبتلع — نُهيئ كل المفاتيح
         api = getattr(client, "api", None)
         if api is not None:
