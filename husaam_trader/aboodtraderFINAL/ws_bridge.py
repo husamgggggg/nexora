@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
+"""
+جسر WebSocket: Playwright (متصفح) ↔ websockets (محلي) ↔ pyquotex/websocket-client.
+
+مهم: Socket.IO قد يرسل إطارات نصية أو ثنائية؛ تحويل الثنائي إلى نص يفسد البروتوكول.
+نمرّر النص كما هو، والثنائي كـ base64 بين JS وPython ثم نعيد bytes إلى العميل المحلي.
+"""
 import argparse
 import asyncio
+import base64
 import traceback
-from playwright.async_api import async_playwright
+
 import websockets
+from playwright.async_api import async_playwright
 
 
 async def bridge_handler(client_ws, target_url: str):
@@ -24,121 +32,153 @@ async def bridge_handler(client_ws, target_url: str):
         page = await context.new_page()
         await page.goto("https://qxbroker.com", wait_until="domcontentloaded")
 
-        async def emit_to_python(message):
-            await outbound.put(str(message))
+        async def emit_to_python(payload):
+            """payload من JS: {k:'t', d: str} أو {k:'b', d: base64}"""
+            try:
+                if not isinstance(payload, dict):
+                    await outbound.put(("str", str(payload)))
+                    return
+                kind = payload.get("k")
+                if kind == "b":
+                    raw = base64.b64decode(payload.get("d") or "")
+                    await outbound.put(("bin", raw))
+                else:
+                    await outbound.put(("str", payload.get("d") or ""))
+            except Exception:
+                print("[Bridge] emit_to_python failed")
+                print(traceback.format_exc())
 
         await page.expose_function("__bridgeEmit", emit_to_python)
+
         await page.evaluate(
             """
             () => {
-              window.__bridgeQueue = [];
-              window.__bridgeResolvers = [];
-              window.__bridgePushFromPy = (msg) => {
-                if (window.__bridgeResolvers.length > 0) {
-                  const fn = window.__bridgeResolvers.shift();
-                  fn(msg);
-                } else {
-                  window.__bridgeQueue.push(msg);
-                }
-              };
-              window.__bridgePullFromPy = () => {
-                return new Promise((resolve) => {
-                  if (window.__bridgeQueue.length > 0) {
-                    resolve(window.__bridgeQueue.shift());
-                  } else {
-                    window.__bridgeResolvers.push(resolve);
-                  }
-                });
-              };
-            }
-            """
-        )
-
-        await page.evaluate(
-            """
-            (targetUrl) => {
               window.__targetWs = null;
-              window.__targetOpen = false;
               window.__targetPending = [];
 
-              window.__bridgeSend = (msg) => {
+              window.__bridgeSend = (txt) => {
                 if (window.__targetWs && window.__targetWs.readyState === 1) {
-                  window.__targetWs.send(msg);
+                  window.__targetWs.send(txt);
                 } else {
-                  window.__targetPending.push(msg);
+                  window.__targetPending.push({ type: "t", data: txt });
+                }
+              };
+
+              window.__bridgeSendBin = (b64) => {
+                const bin = atob(b64);
+                const bytes = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                if (window.__targetWs && window.__targetWs.readyState === 1) {
+                  window.__targetWs.send(bytes.buffer);
+                } else {
+                  window.__targetPending.push({ type: "b", data: b64 });
                 }
               };
 
               const flushPending = () => {
                 if (!window.__targetWs || window.__targetWs.readyState !== 1) return;
                 while (window.__targetPending.length > 0) {
-                  const m = window.__targetPending.shift();
-                  window.__targetWs.send(m);
+                  const item = window.__targetPending.shift();
+                  if (item.type === "b") {
+                    const raw = atob(item.data);
+                    const bytes = new Uint8Array(raw.length);
+                    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+                    window.__targetWs.send(bytes.buffer);
+                  } else {
+                    window.__targetWs.send(item.data);
+                  }
                 }
               };
 
-              const connectTarget = () => {
+              const connectTarget = (targetUrl) => {
                 const ws = new WebSocket(targetUrl);
                 window.__targetWs = ws;
+                ws.binaryType = "arraybuffer";
                 ws.onopen = () => {
-                  window.__targetOpen = true;
-                  window.__bridgeEmit("__WS_OPEN__");
+                  window.__bridgeEmit({ k: "t", d: "__WS_OPEN__" });
                   flushPending();
                 };
                 ws.onclose = () => {
-                  window.__targetOpen = false;
-                  window.__bridgeEmit("__WS_CLOSE__");
-                  setTimeout(connectTarget, 1200);
+                  window.__bridgeEmit({ k: "t", d: "__WS_CLOSE__" });
+                  setTimeout(() => connectTarget(targetUrl), 1200);
                 };
                 ws.onerror = () => {
-                  window.__bridgeEmit("__WS_ERROR__");
+                  window.__bridgeEmit({ k: "t", d: "__WS_ERROR__" });
                 };
-                ws.onmessage = (event) => {
-                  if (typeof event.data === "string") {
-                    window.__bridgeEmit(event.data);
-                  } else {
-                    window.__bridgeEmit("__WS_BINARY__");
+                ws.onmessage = async (event) => {
+                  try {
+                    if (typeof event.data === "string") {
+                      window.__bridgeEmit({ k: "t", d: event.data });
+                      return;
+                    }
+                    let ab;
+                    if (event.data instanceof ArrayBuffer) {
+                      ab = event.data;
+                    } else if (event.data instanceof Blob) {
+                      ab = await event.data.arrayBuffer();
+                    } else {
+                      window.__bridgeEmit({ k: "t", d: String(event.data) });
+                      return;
+                    }
+                    const bytes = new Uint8Array(ab);
+                    let binary = "";
+                    for (let i = 0; i < bytes.length; i++) {
+                      binary += String.fromCharCode(bytes[i]);
+                    }
+                    window.__bridgeEmit({ k: "b", d: btoa(binary) });
+                  } catch (e) {
+                    window.__bridgeEmit({ k: "t", d: "__WS_BRIDGE_ERR__" });
                   }
                 };
               };
 
-              connectTarget();
+              window.__connectTarget = connectTarget;
             }
-            """,
-            target_url,
+            """
         )
+
+        await page.evaluate("(targetUrl) => window.__connectTarget(targetUrl)", target_url)
 
         async def from_local_client():
             async for msg in client_ws:
                 try:
                     if isinstance(msg, (bytes, bytearray)):
-                        try:
-                            payload = msg.decode("utf-8")
-                        except Exception:
-                            payload = msg.decode("latin-1", errors="ignore")
+                        b64 = base64.b64encode(bytes(msg)).decode("ascii")
+                        await page.evaluate("(b64) => window.__bridgeSendBin(b64)", b64)
                     else:
-                        payload = str(msg)
-                    await page.evaluate("(m) => window.__bridgeSend(m)", payload)
+                        await page.evaluate("(m) => window.__bridgeSend(m)", str(msg))
                 except Exception:
                     print("[Bridge] from_local_client send failed")
                     print(traceback.format_exc())
 
         async def to_local_client():
             while True:
-                msg = await outbound.get()
-                if msg == "__WS_OPEN__":
+                item = await outbound.get()
+                if not isinstance(item, tuple) or len(item) != 2:
                     continue
-                if msg == "__WS_CLOSE__":
-                    # target closed; keep local open while browser auto-reconnects
-                    continue
-                if msg == "__WS_ERROR__":
-                    continue
-                try:
-                    await client_ws.send(msg)
-                except Exception:
-                    print("[Bridge] to_local_client send failed")
-                    print(traceback.format_exc())
-                    return
+                kind, data = item
+                if kind == "str":
+                    if data == "__WS_OPEN__":
+                        continue
+                    if data == "__WS_CLOSE__":
+                        continue
+                    if data == "__WS_ERROR__":
+                        continue
+                    if data == "__WS_BRIDGE_ERR__":
+                        continue
+                    try:
+                        await client_ws.send(data)
+                    except Exception:
+                        print("[Bridge] to_local_client str send failed")
+                        print(traceback.format_exc())
+                        return
+                else:
+                    try:
+                        await client_ws.send(data)
+                    except Exception:
+                        print("[Bridge] to_local_client bin send failed")
+                        print(traceback.format_exc())
+                        return
 
         try:
             await asyncio.gather(from_local_client(), to_local_client())
@@ -154,9 +194,6 @@ async def main():
     args = parser.parse_args()
 
     async def handler(ws, *rest):
-        # Compatible with both websockets APIs:
-        # - new versions: handler(ws)
-        # - old versions: handler(ws, path)
         try:
             await bridge_handler(ws, args.target_url)
         except Exception as e:
