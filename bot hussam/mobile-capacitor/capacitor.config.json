@@ -1,0 +1,13 @@
+{
+  "appId": "com.aboodtrader.app",
+  "appName": "Abood Trader",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "http",
+    "url": "http://187.127.142.123:8000/",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

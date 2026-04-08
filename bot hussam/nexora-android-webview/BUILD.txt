@@ -1,0 +1,78 @@
+NEXORA — بناء APK (WebView → عنوان IP بدون دومين)
+==================================================
+
+1) ثبّت Android Studio (أحدث نسخة مستقرة).
+
+2) افتح المجلد: nexora-android-webview
+   File → Open → اختر المجلد.
+
+3) عدّل عنوان الخادم:
+   app/src/main/res/values/strings.xml
+   غيّر YOUR_SERVER_IP إلى IP السيرفر الحقيقي، مثال:
+   http://203.0.113.50:8000/
+
+4) على السيرفر يجب أن يعمل bot.py ويستمع على 0.0.0.0:8000
+   وفتح المنفذ 8000 في الجدار الناري / لوحة الاستضافة.
+
+5) Build → Build Bundle(s) / APK(s) → Build APK(s)
+   أو: ./gradlew assembleDebug   (من جذر nexora-android-webview بعد توليد Gradle Wrapper من Android Studio)
+
+6) ملف APK التجريبي:
+   app/build/outputs/apk/debug/app-debug.apk
+
+ملاحظات:
+- usesCleartextTraffic=true يسمح بـ HTTP (بدون HTTPS) — مناسب للـ IP المباشر.
+- لتغيير العنوان لاحقاً دون إعادة بناء: يمكن لاحقاً استبدال النص بقراءة من ملف إعدادات (غير مطبّق هنا).
+- تثبيت APK من مصدر غير معروف: إعدادات أندرويد → السماح بالتثبيت من هذا المصدر.
+
+--- إذا فشل Sync: Connection reset / تعذر تنزيل Gradle ---
+"Connection reset" = انقطع اتصال TCP أثناء التنزيل (شبكة، جدار ناري، مضاد فيروسات، أو حجب المزوّد).
+gradle.properties يضيف keepAlive=false و org.gradle.parallel=false لتقليل ذلك؛ نفّذ Sync بعد الحفظ.
+
+أ) أغلق دايمون Gradle ثم أعد المحاولة:
+   من cmd في أي مجلد (إن وُجد gradlew استخدمه):
+     gradle --stop
+   أو من Android Studio: File → Invalidate Caches → (اختياري) ثم أعد تشغيل Studio.
+
+ب) احذف كاش تنزيلات تالفة ثم Sync:
+   C:\Users\<اسمك>\.gradle\caches\modules-2\files-2.1  (أو احذف مجلد caches بالكامل إن لا مانع — سيعاد التنزيل)
+   C:\Users\<اسمك>\.gradle\wrapper\dists\  (المجلدات التي فيها ملف .part أو ناقصة)
+
+ج) استثناءات Windows Defender (مهم جداً على Windows):
+   أضف استثناءات لـ: مجلد المشروع، و C:\Users\<اسمك>\.gradle ، ومجلد تثبيت Android Studio.
+
+د) جرّب VPN أو نقطة اتصال من الجوال؛ أو شبكة أخرى إن كان المزوّد يقطع HTTPS الطويل.
+
+3) تنزيل Gradle يدوياً (بدون الاعتماد على Studio):
+   - من المتصفح افتح:
+     https://services.gradle.org/distributions/gradle-8.6-bin.zip
+     واحفظ الملف.
+   - فك الضغط إلى مجلد ثابت، مثلاً: C:\gradle-8.6
+   - Android Studio: File → Settings → Build, Execution, Deployment → Gradle
+     → Gradle JDK: اتركه كما هو
+     → "Use Gradle from" → Specified location → اختر C:\gradle-8.6
+   - Apply ثم Sync.
+
+4) بروكسي (إن لزم): في gradle.properties أضف (عدّل القيم):
+   systemProp.http.proxyHost=...
+   systemProp.http.proxyPort=8080
+
+5) تأكد أن جدار النار/مضاد الفيروسات لا يمنع java.exe أو studio64.exe.
+
+--- إذا ظهر: Plugin com.android.application was not found ---
+يعني Gradle لم يصل إلى مستودع Google (ليس خطأ في المشروع عادةً).
+
+0) المشروع يضيف مرآة Maven (Aliyun) قبل Google في settings.gradle.kts — نفّذ Sync من جديد.
+   إن استمر الخطأ: جرّب فتح في المتصفح:
+   https://maven.aliyun.com/repository/google/com/android/tools/build/gradle/8.4.2/gradle-8.4.2.pom
+
+1) من المتصفح على نفس الجهاز افتح (يجب أن يُحمّل ملفاً أو يظهر نص XML):
+   https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/8.4.2/gradle-8.4.2.pom
+   إن فشل التحميل: VPN أو شبكة أخرى، أو فك حجب dl.google.com.
+
+2) في gradle.properties مفعّل تفضيل IPv4 (يقلّل أعطال الاتصال على Windows).
+
+3) إن كنت خلف بروكسي، أضف systemProp.http(s).proxyHost/Port كما في القسم أعلاه.
+
+4) في Android Studio: File → Settings → Build → Gradle → عطّل "Offline work".
+   ثم File → Sync Project with Gradle Files.

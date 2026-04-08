@@ -1,0 +1,3 @@
+# Nexora desktop (PySide6 + Qt WebEngine). Install in the same venv or a fresh one:
+#   pip install -r requirements-desktop.txt
+PySide6>=6.6.0

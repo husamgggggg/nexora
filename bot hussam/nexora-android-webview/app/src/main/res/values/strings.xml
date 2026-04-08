@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NEXORA TRADE</string>
+    <!-- غيّر إلى IP سيرفرك (مع المنفذ). يجب أن يعمل bot.py على 0.0.0.0:8000 -->
+    <string name="nexora_server_url">http://187.127.8.91:8000/</string>
+</resources>

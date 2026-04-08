@@ -1,0 +1,10 @@
+{
+  "appId": "com.aboodtrader.app",
+  "appName": "Abood Trader",
+  "webDir": "www",
+  "server": {
+    "url": "https://aboodtrading.com",
+    "androidScheme": "https",
+    "cleartext": false
+  }
+}
