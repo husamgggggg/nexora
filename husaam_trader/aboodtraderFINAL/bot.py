@@ -1828,25 +1828,24 @@ async def _build_available_assets_payload(S: dict):
         return payload
 
     client = S["client"]
-    try:
-        await _ensure_quotex_assets(client)
-    except Exception:
-        pass
-
-    # مهم: لا نستدعي check_asset_open/get_payment لأنها قد تعيد تهيئة اتصال pyquotex
-    # وتؤثر على استقرار الـ WebSocket. نعتمد فقط على codes_asset الموجودة بعد get_all_assets.
+    # مهم جداً: لا نرسل أي طلب جديد إلى pyquotex داخل /api/assets
+    # (لا get_all_assets ولا check_asset_open ولا get_payment) لأن هذه النداءات
+    # قد تعيد تهيئة الاتصال وتؤثر على استقرار WebSocket الجاري.
+    # نعتمد فقط على آخر codes_asset الموجودة بالذاكرة.
     codes = getattr(client, "codes_asset", None) or {}
     known = set(k for k in codes.keys() if isinstance(k, str))
     if known:
         open_assets = [a for a in SUPPORTED_ASSETS_ALL if a in known]
+        source = "quotex-codes-cache"
     else:
         open_assets = list(SUPPORTED_ASSETS_ALL)
+        source = "fallback-no-codes-cache"
 
     otc = [a for a in open_assets if a.endswith("_otc")]
     live = [a for a in open_assets if not a.endswith("_otc")]
     payload["assets"] = {"otc": otc, "live": live, "all": open_assets}
     payload["payouts"] = {}
-    payload["source"] = "quotex"
+    payload["source"] = source
     payload["updated_at"] = int(time.time())
     return payload
 
@@ -3340,7 +3339,7 @@ async def assets_ep(token: str = ""):
     if not S:
         raise HTTPException(403, "جلسة غير صالحة")
     if not S.get("logged_in"):
-        return {
+        payload = {
             "success": True,
             "assets": {
                 "otc": list(SUPPORTED_ASSETS_OTC),
@@ -3351,17 +3350,34 @@ async def assets_ep(token: str = ""):
             "source": "pre-login",
             "updated_at": int(time.time()),
         }
+        log.info("📊 /api/assets | pre-login | count=%s", len(payload["assets"]["all"]))
+        return payload
 
     now = time.time()
     cache_ttl_sec = 20.0
     cached = S.get("_assets_cache")
     cached_ts = float(S.get("_assets_cache_ts", 0.0) or 0.0)
     if isinstance(cached, dict) and (now - cached_ts) < cache_ttl_sec:
+        a = cached.get("assets", {}) if isinstance(cached, dict) else {}
+        count = len(a.get("all", [])) if isinstance(a, dict) else 0
+        log.info(
+            "📊 /api/assets | email=%s | source=%s | count=%s | cache=hit",
+            S.get("email", ""),
+            cached.get("source", "unknown"),
+            count,
+        )
         return cached
 
     payload = await _build_available_assets_payload(S)
     S["_assets_cache"] = payload
     S["_assets_cache_ts"] = now
+    count = len(payload.get("assets", {}).get("all", []))
+    log.info(
+        "📊 /api/assets | email=%s | source=%s | count=%s | cache=miss",
+        S.get("email", ""),
+        payload.get("source", "unknown"),
+        count,
+    )
     return payload
 
 @app.post("/api/bot/start")
