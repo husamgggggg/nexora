@@ -2476,6 +2476,40 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     last_used_asset = None
     # منع تكرار نفس الإشارة أكثر من مرة في نفس دقيقة الشمعة
     signal_attempted = {}
+    # عزل الأزواج التي تفشل مؤقتاً (مهلة/نقص شموع) بدل تعطيل الدورة كلها
+    asset_fail_count: dict[str, int] = {a: 0 for a in all_assets}
+    asset_cooldown_until: dict[str, float] = {a: 0.0 for a in all_assets}
+    asset_last_cooldown_log: dict[str, float] = {a: 0.0 for a in all_assets}
+
+    def _scan_assets() -> list[str]:
+        now_ts = time.time()
+        active = [a for a in all_assets if now_ts >= float(asset_cooldown_until.get(a, 0.0) or 0.0)]
+        # إذا تم عزل كل الأزواج، نفك العزل للكل ونكمل.
+        if active:
+            return active
+        for a in all_assets:
+            asset_cooldown_until[a] = 0.0
+            asset_fail_count[a] = 0
+        return list(all_assets)
+
+    def _note_asset_failure(asset: str, reason: str) -> None:
+        c = int(asset_fail_count.get(asset, 0)) + 1
+        asset_fail_count[asset] = c
+        # بعد فشلين متتاليين: عزل 180 ثانية لهذا الزوج فقط.
+        if c >= 2:
+            until = time.time() + 180
+            asset_cooldown_until[asset] = until
+            now_ts = time.time()
+            if now_ts - float(asset_last_cooldown_log.get(asset, 0.0) or 0.0) >= 15:
+                left = int(max(1, until - now_ts))
+                log.warning("⏸️ عزل مؤقت للزوج %s لمدة %ss بسبب: %s", asset, left, reason)
+                asset_last_cooldown_log[asset] = now_ts
+
+    def _note_asset_success(asset: str) -> None:
+        if asset_fail_count.get(asset, 0):
+            asset_fail_count[asset] = 0
+        if asset_cooldown_until.get(asset, 0):
+            asset_cooldown_until[asset] = 0.0
 
     # ── بدء تدفق الأسعار الحية لكل الأزواج ───────────────────────────────────
     if QX and S["client"]:
@@ -2553,13 +2587,14 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
             # ── تحليل الشمعات ─────────────────────────────────────────────
             direction = "wait"
-            chosen_asset = all_assets[0]
+            _active_assets = _scan_assets()
+            chosen_asset = _active_assets[0]
             burst_count = 1
             any_candles = False
 
             if QX and S["logged_in"] and S["client"]:
                 # جمع أسعار لكل الأزواج
-                for a in all_assets:
+                for a in _active_assets:
                     _collect_price(S["client"], a, S["email"])
 
                 # تحليل كل الأزواج واختيار الأقوى إشارة
@@ -2577,7 +2612,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 _need_len = _min_bars
                 _max_len = 0
                 ema_src_label = ""
-                for a in all_assets:
+                for a in _active_assets:
                     if req.strategy == "HUSAAM_PRIVATE":
                         candles, _csrc = _get_husaam_ema10_candles(
                             S["client"],
@@ -2608,6 +2643,10 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                             ema_src_label = str(_csrc)
                     _max_len = max(_max_len, len(candles))
                     candles_by_asset[a] = candles
+                    if _csrc.endswith("insufficient"):
+                        _note_asset_failure(a, _csrc)
+                    elif len(candles) >= _need_len:
+                        _note_asset_success(a)
                     if len(candles) >= _need_len:
                         any_candles = True
                         d, score = analyze_score(candles, req.strategy)
@@ -2634,12 +2673,19 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     log.info(f"🏆 أفضل زوج: {chosen_asset} → {direction.upper()} (score={best_score})")
                 elif not any_candles:
                     _now = time.time()
+                    _cool_left = {
+                        a: int(max(0, asset_cooldown_until.get(a, 0.0) - _now))
+                        for a in all_assets
+                        if asset_cooldown_until.get(a, 0.0) > _now
+                    }
                     if _now - S.get("_last_candle_warn_ts", 0) >= 15:
                         log.warning(
                             "⚠️ شمعات غير كافية للتحليل — لديك %s/%s شمعة 1m (مطلوب من الشارت لا من التيك)",
                             _max_len,
                             _need_len,
                         )
+                        if _cool_left:
+                            log.warning("⏸️ أزواج معزولة مؤقتاً: %s", _cool_left)
                         S["_last_candle_warn_ts"] = _now
                     S["status_msg"] = (
                         f"⏳ شموع دقيقة: {_max_len}/{_need_len} · {ema_src_label}"
