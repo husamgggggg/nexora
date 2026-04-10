@@ -839,6 +839,23 @@ SUPPORTED_ASSETS_LIVE = [
     "EURGBP", "EURAUD", "GBPAUD", "NZDUSD",
 ]
 SUPPORTED_ASSETS_ALL = SUPPORTED_ASSETS_OTC + SUPPORTED_ASSETS_LIVE
+CURRENCY_CODES = {
+    "AED", "ARS", "AUD", "BRL", "CAD", "CHF", "CLP", "CNH", "CZK",
+    "DKK", "EGP", "EUR", "GBP", "HKD", "HUF", "IDR", "ILS", "INR",
+    "JPY", "KES", "KRW", "KWD", "MXN", "MYR", "NOK", "NZD", "PHP",
+    "PKR", "PLN", "QAR", "RON", "RUB", "SAR", "SEK", "SGD", "THB",
+    "TRY", "TWD", "UAH", "USD", "VND", "XOF", "ZAR",
+}
+
+
+def _is_forex_pair_symbol(symbol: str) -> bool:
+    s = str(symbol or "").strip().upper()
+    if s.endswith("_OTC"):
+        s = s[:-4]
+    if len(s) != 6 or not s.isalpha():
+        return False
+    base, quote = s[:3], s[3:]
+    return base in CURRENCY_CODES and quote in CURRENCY_CODES
 
 def new_session(email=""):
     return {
@@ -1841,11 +1858,13 @@ async def _build_available_assets_payload(S: dict):
         },
         key=lambda x: x.lower(),
     )
+    known = [k for k in known if _is_forex_pair_symbol(k)]
     if known:
-        # اعرض كل أزواج المنصة الظاهرة في codes_asset (وليس قائمة ثابتة فقط)
+        # اعرض فقط أزواج العملات (فوركس) من codes_asset.
         open_assets = list(known)
         source = "quotex-codes-cache"
     else:
+        # fallback محلي (فوركس فقط)
         open_assets = list(SUPPORTED_ASSETS_ALL)
         source = "fallback-no-codes-cache"
 
