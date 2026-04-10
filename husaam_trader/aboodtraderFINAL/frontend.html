@@ -688,6 +688,7 @@ h1{font-size:18px;}
 const DEFAULT_ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','EURJPY_otc','GBPJPY_otc','AUDCAD_otc','USDCAD_otc','EURGBP_otc','EURAUD_otc','GBPAUD_otc','NZDUSD_otc'];
 const DEFAULT_ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
 const DEFAULT_ASSETS=[...DEFAULT_ASSETS_OTC,...DEFAULT_ASSETS_LIVE];
+const ASSETS_REFRESH_INTERVAL_MS=10*60*1000;
 const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0};
 const MAX_ASSETS=3;
 const PAIR_FLAGS={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz'};
@@ -952,7 +953,7 @@ function showTradePopup(msg){
 function startPoll(){
   s.pollInt=setInterval(async()=>{
     const d=await api('/status?token='+s.token);if(!d)return;
-    if(Date.now()-s.lastAssetsSyncAt>15000)refreshAvailableAssets(false);
+    if(Date.now()-s.lastAssetsSyncAt>ASSETS_REFRESH_INTERVAL_MS)refreshAvailableAssets(false);
     s.rBal=d.real_balance;s.dBal=d.demo_balance;if(d.currency)s.currency=d.currency;
     s.wins=d.wins;s.losses=d.losses;s.profit=d.session_profit||0;
     updBals();updStats();
