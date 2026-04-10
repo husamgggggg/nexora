@@ -1754,12 +1754,6 @@ _WARMUP_COLLECT_SEC = 180
 _WARMUP_COLLECT_SEC_EMA10 = 25
 
 
-def _session_asset_key(email: str | None, asset: str) -> str:
-    """يفصل بيانات كل مشترك عن الآخر حتى لو نفس الزوج."""
-    e = (email or "").strip().lower() or "_global"
-    return f"{e}|{asset}"
-
-
 def _quotex_tick_keys(client, asset: str):
     """مفاتيح تيك السعر: الرمز أولاً (غالباً يطابق message[0][0]) ثم رقم الأصل."""
     keys = [asset]
@@ -1822,15 +1816,14 @@ async def _start_price_stream(client, asset):
         log.warning("start_candles_stream(%s): %s", asset, e)
 
 
-def _append_price_tick(asset: str, p: float, email_key: str | None = None) -> None:
+def _append_price_tick(asset: str, p: float) -> None:
     if p <= 0:
         return
-    k = _session_asset_key(email_key, asset)
-    if k not in _price_buffers:
-        _price_buffers[k] = []
-    _price_buffers[k].append({"price": p, "time": time.time()})
+    if asset not in _price_buffers:
+        _price_buffers[asset] = []
+    _price_buffers[asset].append({"price": p, "time": time.time()})
     cutoff = time.time() - _PRICE_BUFFER_RETENTION_SEC
-    _price_buffers[k] = [x for x in _price_buffers[k] if x["time"] > cutoff]
+    _price_buffers[asset] = [x for x in _price_buffers[asset] if x["time"] > cutoff]
 
 
 def _price_from_realtime_candles_tuple(client) -> float:
@@ -1847,7 +1840,7 @@ def _price_from_realtime_candles_tuple(client) -> float:
     return 0.0
 
 
-async def _collect_price_async(client, asset, email_key: str = "") -> float:
+async def _collect_price_async(client, asset) -> float:
     """يقرأ التيك من أي مفتاح مطابق (رقم أو رمز) مع انتظار قصير بين المحاولات."""
     keys = _quotex_tick_keys(client, asset)
     try:
@@ -1859,11 +1852,11 @@ async def _collect_price_async(client, asset, email_key: str = "") -> float:
                     continue
                 p = _parse_rt_price(price)
                 if p > 0:
-                    _append_price_tick(asset, p, email_key=email_key)
+                    _append_price_tick(asset, p)
                     return p
             p2 = _price_from_realtime_candles_tuple(client)
             if p2 > 0:
-                _append_price_tick(asset, p2, email_key=email_key)
+                _append_price_tick(asset, p2)
                 return p2
             await asyncio.sleep(0.2)
     except Exception:
@@ -1874,18 +1867,17 @@ def _collect_price(client, asset, email: str = "") -> float:
     """جلب سعر حي — يجب تشغيله على نفس event loop الخاصة بجلسة Quotex (connect)."""
     try:
         if email and QX:
-            p = run_async_for(email, _collect_price_async(client, asset, email), timeout=12)
+            p = run_async_for(email, _collect_price_async(client, asset), timeout=12)
         else:
-            p = run_async(_collect_price_async(client, asset, email), timeout=12)
+            p = run_async(_collect_price_async(client, asset), timeout=12)
         return p or 0
     except Exception:
         return 0
 
-def _build_candles(asset, candle_secs=5, email_key: str = "") -> list:
-    k = _session_asset_key(email_key, asset)
-    if k not in _price_buffers or len(_price_buffers[k]) < 10:
+def _build_candles(asset, candle_secs=5) -> list:
+    if asset not in _price_buffers or len(_price_buffers[asset]) < 10:
         return []
-    prices = sorted(_price_buffers[k], key=lambda x: x["time"])
+    prices = sorted(_price_buffers[asset], key=lambda x: x["time"])
     candles, buf, t0 = [], [], prices[0]["time"] - (prices[0]["time"] % candle_secs)
     for e in prices:
         ct = e["time"] - (e["time"] % candle_secs)
@@ -1900,8 +1892,8 @@ def _build_candles(asset, candle_secs=5, email_key: str = "") -> list:
     log.debug("📊 %s شمعة من %s سعر", len(candles), len(prices))
     return candles
 
-_husaam_api_candle_cache: dict = {}  # email|asset -> {t, candles, source: "quotex"}
-_husaam_ema10_analysis_log_ts: dict = {}  # email|asset -> وقت آخر log تفصيلي
+_husaam_api_candle_cache: dict = {}  # asset -> {t, candles, source: "quotex"}
+_husaam_ema10_analysis_log_ts: dict = {}  # asset -> وقت آخر log تفصيلي (تخفيف تكرار الكاش)
 
 
 def _normalize_quotex_candle_row(c):
@@ -2175,11 +2167,10 @@ async def _fetch_quotex_minute_candles_async(client, asset: str) -> list:
 def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, analysis_bars=None) -> tuple:
     """يعيد (شموع للتحليل, مصدر). التحليل من آخر N شمعة 1m من Quotex بعد التنظيف — لا تيكات."""
     tgt = analysis_bars if analysis_bars is not None else _HUSAAM_EMA10_ANALYSIS_BARS
-    cache_key = _session_asset_key(email, asset)
     if not QX or not client:
-        return _build_candles(asset, candle_secs=_HUSAAM_EMA10_CANDLE_SECS, email_key=email), "sim_tick_1m"
+        return _build_candles(asset, candle_secs=_HUSAAM_EMA10_CANDLE_SECS), "sim_tick_1m"
     now = time.time()
-    ce = _husaam_api_candle_cache.get(cache_key)
+    ce = _husaam_api_candle_cache.get(asset)
 
     def _finalize(raw: list, label: str) -> tuple:
         prep = _prepare_husaam_ema10_candles_for_analysis(raw, max_bars=tgt)
@@ -2190,7 +2181,7 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
         t0 = out[0].get("time")
         t1 = out[-1].get("time")
         _tl = time.time()
-        _throttle = label == "quotex_1m_cache" and (_tl - _husaam_ema10_analysis_log_ts.get(cache_key, 0) < 30)
+        _throttle = label == "quotex_1m_cache" and (_tl - _husaam_ema10_analysis_log_ts.get(asset, 0) < 30)
         if not _throttle:
             log.info(
                 "📊 EMA10 analysis: asset=%s current_asset=%s period=60 need=%s got=%s first_ts=%s last_ts=%s src=%s",
@@ -2202,7 +2193,7 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
                 int(t1) if t1 is not None else None,
                 label,
             )
-            _husaam_ema10_analysis_log_ts[cache_key] = _tl
+            _husaam_ema10_analysis_log_ts[asset] = _tl
         return out, label
 
     if (
@@ -2223,7 +2214,7 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
         lst = []
 
     if lst:
-        _husaam_api_candle_cache[cache_key] = {"t": now, "candles": lst, "source": "quotex"}
+        _husaam_api_candle_cache[asset] = {"t": now, "candles": lst, "source": "quotex"}
         got, lab = _finalize(lst, "quotex_1m")
         if got:
             return got, lab
@@ -2514,10 +2505,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
         stop.wait(timeout=1)
     if _should_stop(): return
 
-    _tick_total = sum(
-        len(_price_buffers.get(_session_asset_key(S.get("email", ""), a), []))
-        for a in all_assets
-    )
+    _tick_total = sum(len(_price_buffers.get(a, [])) for a in all_assets)
     log.info("✅ مراقبة: %s تيك محفوظ — بدء الحلقة (%s)", _tick_total, req.strategy)
     S["status_msg"] = ""
 
