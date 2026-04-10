@@ -2408,6 +2408,14 @@ async def _login_qx(email, password, S):
             err = str(msg) or "فشل الاتصال"
             S["login_error"] = err[:800]
             return {"ok":False,"pin":False,"msg":err}
+        # حمّل خريطة الأصول مباشرة بعد نجاح connect حتى /api/assets تعرض المتاح فعلياً.
+        try:
+            await _ensure_quotex_assets(client)
+            _codes = getattr(client, "codes_asset", None) or {}
+            log.info("📚 assets map loaded after login: %s symbols", len(_codes))
+        except Exception as e:
+            log.warning("تعذر تحميل assets map بعد login: %s", e)
+
         real, demo = await _get_balances(client)
         cur = "USD"
         try:
