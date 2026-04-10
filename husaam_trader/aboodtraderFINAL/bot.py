@@ -663,7 +663,10 @@ def _install_pyquotex_ws_proxy_patch(proxies):
 
 
 QX_HTTP_PROXIES = _init_zenrows_for_pyquotex()
-_install_pyquotex_ws_proxy_patch(QX_HTTP_PROXIES)
+if os.getenv("QUOTEX_DISABLE_WS_PROXY_PATCH", "").strip().lower() in ("1", "true", "yes", "on"):
+    log.info("تم تعطيل WS proxy patch عبر QUOTEX_DISABLE_WS_PROXY_PATCH=1")
+else:
+    _install_pyquotex_ws_proxy_patch(QX_HTTP_PROXIES)
 
 USERS_F  = "data/users.json"
 ADMIN_PW = os.getenv("ADMIN_PW", "Admin@2024")
