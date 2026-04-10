@@ -741,7 +741,7 @@ function scheduleAssetsRefreshAfterLogin(){
   assetsInitTimer=setTimeout(()=>{
     assetsInitTimer=null;
     refreshAvailableAssets(true);
-  },5000);
+  },30000);
 }
 function tickSimPayouts(){
   getAvailableAssetSet().forEach(a=>{
