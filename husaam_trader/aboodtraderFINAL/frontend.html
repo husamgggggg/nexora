@@ -735,6 +735,14 @@ async function refreshAvailableAssets(notify){
   s.lastAssetsSyncAt=Date.now();
   sanitizeSelectedAssets(!!notify);
 }
+let assetsInitTimer=null;
+function scheduleAssetsRefreshAfterLogin(){
+  if(assetsInitTimer){clearTimeout(assetsInitTimer);assetsInitTimer=null;}
+  assetsInitTimer=setTimeout(()=>{
+    assetsInitTimer=null;
+    refreshAvailableAssets(true);
+  },5000);
+}
 function tickSimPayouts(){
   getAvailableAssetSet().forEach(a=>{
     const min=a.endsWith('_otc')?72:60;
@@ -862,9 +870,10 @@ function afterLogin(d){
   s.email=d.email;s.uid='#'+d.user_id;s.rBal=d.real_balance||0;s.dBal=d.demo_balance||0;s.currency=d.currency||'USD';
   document.getElementById('hId').textContent=s.uid;document.getElementById('hEm').textContent=s.email;document.getElementById('dEm').textContent=s.email;
   document.getElementById('pinBox').style.display='none';document.getElementById('loginBox').style.display='block';
-  updBals();toast('✅ مرحباً بك في نيكسورا تريد','ok');go('sBot',2);refreshAvailableAssets(true);if(!s.sim)startPoll();
+  updBals();toast('✅ مرحباً بك في نيكسورا تريد','ok');go('sBot',2);scheduleAssetsRefreshAfterLogin();if(!s.sim)startPoll();
 }
 async function doLogout(){
+  if(assetsInitTimer){clearTimeout(assetsInitTimer);assetsInitTimer=null;}
   doStop();clearInterval(s.pollInt);if(s.token)await api('/logout','POST',{token:s.token});
   s.token='';s.email='';s.running=false;localStorage.removeItem('at_email');go('sReg',-1);toast('تم تسجيل الخروج','');
 }
@@ -1236,7 +1245,7 @@ if(_em){
         document.getElementById('dEm').textContent=s.email;
         updBals();updStats();
         if(s.running){document.getElementById('stBtn').textContent='إيقاف البوت';document.getElementById('stBtn').classList.add('stop');}
-        go('sBot',2);refreshAvailableAssets(true);if(!s.sim)startPoll();
+        go('sBot',2);scheduleAssetsRefreshAfterLogin();if(!s.sim)startPoll();
         toast('✅ تم استعادة جلستك','ok');
       }else{go('sLogin',-1);}
     })();
