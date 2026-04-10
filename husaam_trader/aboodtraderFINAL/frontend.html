@@ -685,24 +685,62 @@ h1{font-size:18px;}
 <div class="trade-pop" id="tradePop"></div>
 
 <script>
-const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null};
-const ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','EURJPY_otc','GBPJPY_otc','AUDCAD_otc','USDCAD_otc','EURGBP_otc','EURAUD_otc','GBPAUD_otc','NZDUSD_otc'];
-const ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
-const ASSETS=[...ASSETS_OTC,...ASSETS_LIVE];
+const DEFAULT_ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','EURJPY_otc','GBPJPY_otc','AUDCAD_otc','USDCAD_otc','EURGBP_otc','EURAUD_otc','GBPAUD_otc','NZDUSD_otc'];
+const DEFAULT_ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
+const DEFAULT_ASSETS=[...DEFAULT_ASSETS_OTC,...DEFAULT_ASSETS_LIVE];
+const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0};
 const MAX_ASSETS=3;
 const PAIR_FLAGS={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz'};
-const ASSET_PAYOUT={};
-ASSETS.forEach(a=>{
+DEFAULT_ASSETS.forEach(a=>{
   const min=a.endsWith('_otc')?72:60;
   const max=a.endsWith('_otc')?92:86;
-  ASSET_PAYOUT[a]=Math.round(min+Math.random()*(max-min));
+  s.assetPayout[a]=Math.round(min+Math.random()*(max-min));
 });
+function getAvailableAssets(kind){
+  const arr=s.availableAssets&&Array.isArray(s.availableAssets[kind])?s.availableAssets[kind]:[];
+  if(arr.length>0)return arr;
+  return kind==='otc'?[...DEFAULT_ASSETS_OTC]:[...DEFAULT_ASSETS_LIVE];
+}
+function getAvailableAssetSet(){
+  const all=(s.availableAssets&&Array.isArray(s.availableAssets.all)&&s.availableAssets.all.length>0)
+    ?s.availableAssets.all
+    :[...DEFAULT_ASSETS];
+  return new Set(all);
+}
+function sanitizeSelectedAssets(notify){
+  const allowed=getAvailableAssetSet();
+  const before=s.assets.length;
+  s.assets=s.assets.filter(a=>allowed.has(a));
+  if(!allowed.has(s.asset))s.asset=s.assets[0]||Array.from(allowed)[0]||'';
+  if(s.assets.length===0&&s.asset)s.assets=[s.asset];
+  const removed=before-s.assets.length;
+  if(notify&&removed>0&&Date.now()-s.lastAssetsWarnAt>4000){
+    s.lastAssetsWarnAt=Date.now();
+    toast('تم حذف أزواج مغلقة من اختيارك تلقائياً','wa');
+  }
+  updAssetLabel();
+}
+async function refreshAvailableAssets(notify){
+  if(!s.token)return;
+  const d=await api('/assets?token='+encodeURIComponent(s.token));
+  if(!d||d.success===false)return;
+  const a=d.assets||{};
+  const all=Array.isArray(a.all)?a.all:[];
+  s.availableAssets={
+    otc:Array.isArray(a.otc)?a.otc:[],
+    live:Array.isArray(a.live)?a.live:[],
+    all:all
+  };
+  if(d.payouts&&typeof d.payouts==='object')Object.assign(s.assetPayout,d.payouts);
+  s.lastAssetsSyncAt=Date.now();
+  sanitizeSelectedAssets(!!notify);
+}
 function tickSimPayouts(){
-  ASSETS.forEach(a=>{
+  getAvailableAssetSet().forEach(a=>{
     const min=a.endsWith('_otc')?72:60;
     const max=a.endsWith('_otc')?92:86;
     const step=(Math.random()<0.5?-1:1)*(1+Math.floor(Math.random()*2));
-    ASSET_PAYOUT[a]=Math.max(min,Math.min(max,(ASSET_PAYOUT[a]||min)+step));
+    s.assetPayout[a]=Math.max(min,Math.min(max,(s.assetPayout[a]||min)+step));
   });
 }
 setInterval(tickSimPayouts, 9000);
@@ -717,7 +755,7 @@ function pairFlags(asset){
   return [PAIR_FLAGS[b]||'un',PAIR_FLAGS[q]||'un'];
 }
 function pairLabel(asset){return asset.replace('_otc',' OTC');}
-function pairPayout(asset){return `${ASSET_PAYOUT[asset]||80}%`;}
+function pairPayout(asset){return `${s.assetPayout[asset]||80}%`;}
 function renderPairOption(asset){
   const [b,q]=pairFlags(asset);
   return `<div class="oi-row"><div class="oi-main"><span class="oi-check">✓</span></div><div class="oi-main"><span class="oi-name">${pairLabel(asset)}</span><img class="oi-flag" src="https://flagcdn.com/w20/${b}.png" alt="${b}"><img class="oi-flag" src="https://flagcdn.com/w20/${q}.png" alt="${q}"></div></div>`;
@@ -824,7 +862,7 @@ function afterLogin(d){
   s.email=d.email;s.uid='#'+d.user_id;s.rBal=d.real_balance||0;s.dBal=d.demo_balance||0;s.currency=d.currency||'USD';
   document.getElementById('hId').textContent=s.uid;document.getElementById('hEm').textContent=s.email;document.getElementById('dEm').textContent=s.email;
   document.getElementById('pinBox').style.display='none';document.getElementById('loginBox').style.display='block';
-  updBals();toast('✅ مرحباً بك في نيكسورا تريد','ok');go('sBot',2);if(!s.sim)startPoll();
+  updBals();toast('✅ مرحباً بك في نيكسورا تريد','ok');go('sBot',2);refreshAvailableAssets(true);if(!s.sim)startPoll();
 }
 async function doLogout(){
   doStop();clearInterval(s.pollInt);if(s.token)await api('/logout','POST',{token:s.token});
@@ -836,7 +874,13 @@ async function doStart(){
   const pl=s.pOn?(parseFloat(document.getElementById('iPL').value)||0):0;
   const sl=s.sOn?(parseFloat(document.getElementById('iSL').value)||0):0;
   if(amt<=0)return toast('أدخل مبلغ صحيح','er');
-  const assetList=s.assets.length>0?s.assets:[s.asset];
+  sanitizeSelectedAssets(false);
+  const allowed=getAvailableAssetSet();
+  const assetList=(s.assets.length>0?s.assets:[s.asset]).filter(a=>allowed.has(a));
+  if(assetList.length===0)return toast('لا يوجد أزواج متاحة للتداول الآن','er');
+  s.assets=[...assetList];
+  s.asset=assetList[0];
+  updAssetLabel();
   const body={asset:assetList[0],assets:assetList,amount:amt,strategy:s.strategy,account_type:s.acc,profit_limit:pl,stop_loss:sl,token:s.token};
   if(!s.sim){const d=await api('/bot/start','POST',body);if(d&&!d.success)return toast(d.detail||'فشل','er');}
   s.running=true;document.getElementById('stBtn').textContent='إيقاف البوت';document.getElementById('stBtn').classList.add('stop');
@@ -896,6 +940,7 @@ function showTradePopup(msg){
 function startPoll(){
   s.pollInt=setInterval(async()=>{
     const d=await api('/status?token='+s.token);if(!d)return;
+    if(Date.now()-s.lastAssetsSyncAt>15000)refreshAvailableAssets(false);
     s.rBal=d.real_balance;s.dBal=d.demo_balance;if(d.currency)s.currency=d.currency;
     s.wins=d.wins;s.losses=d.losses;s.profit=d.session_profit||0;
     updBals();updStats();
@@ -1098,15 +1143,28 @@ document.addEventListener('input',e=>{
   if(e.target.id==='iPL'&&s.pOn)document.getElementById('plDesc').textContent=`يوقف عند +${e.target.value}`;
   if(e.target.id==='iSL'&&s.sOn)document.getElementById('slDesc').textContent=`يوقف عند -${e.target.value}`;
 });
-function updAssetLabel(){const arr=s.assets.length>0?s.assets:[s.asset];document.getElementById('vAsset').textContent=arr.map(a=>a.replace('_otc',' OTC')).join(' · ');}
+function updAssetLabel(){
+  const arr=s.assets.length>0?s.assets:[s.asset];
+  const txt=arr.filter(Boolean).map(a=>a.replace('_otc',' OTC')).join(' · ');
+  document.getElementById('vAsset').textContent=txt||'لا يوجد زوج متاح';
+}
 function om(key){
   if(key==='assets'){
     document.getElementById('mTit').textContent='اختر الأزواج';
     const list=document.getElementById('mList');list.innerHTML='';
+    sanitizeSelectedAssets(false);
+    const otcAssets=getAvailableAssets('otc');
+    const liveAssets=getAvailableAssets('live');
+    if(otcAssets.length===0&&liveAssets.length===0){
+      const msg=document.createElement('div');
+      msg.style.cssText='padding:12px 4px;color:var(--tx2);font-size:13px;font-weight:700;';
+      msg.textContent='لا يوجد أزواج مفتوحة حالياً. جرّب بعد قليل.';
+      list.appendChild(msg);
+    }
     const h1=document.createElement('div');h1.style.cssText='font-size:10px;color:var(--gold);font-weight:700;padding:4px 2px 8px;letter-spacing:1px;';h1.textContent='── OTC ──';list.appendChild(h1);
-    ASSETS_OTC.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
+    otcAssets.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
     const h2=document.createElement('div');h2.style.cssText='font-size:10px;color:var(--g);font-weight:700;padding:10px 2px 8px;letter-spacing:1px;';h2.textContent='── البورصة ──';list.appendChild(h2);
-    ASSETS_LIVE.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
+    liveAssets.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
     const conf=document.createElement('button');conf.style.cssText='width:100%;margin-top:14px;background:linear-gradient(135deg,var(--g),var(--g2));color:var(--bg);border:none;border-radius:13px;padding:14px;font-family:Roboto,sans-serif;font-size:14px;font-weight:900;cursor:pointer;';
     conf.onclick=()=>{if(s.assets.length===0){toast('اختر زوج واحد على الأقل','er');return;}updAssetLabel();cm(null,true);};
     function updateConf(){conf.textContent=`✅ تأكيد (${s.assets.length}/${MAX_ASSETS})`;}updateConf();
@@ -1178,7 +1236,7 @@ if(_em){
         document.getElementById('dEm').textContent=s.email;
         updBals();updStats();
         if(s.running){document.getElementById('stBtn').textContent='إيقاف البوت';document.getElementById('stBtn').classList.add('stop');}
-        go('sBot',2);if(!s.sim)startPoll();
+        go('sBot',2);refreshAvailableAssets(true);if(!s.sim)startPoll();
         toast('✅ تم استعادة جلستك','ok');
       }else{go('sLogin',-1);}
     })();

@@ -827,6 +827,19 @@ def make_pin_input(email, S):
 # ── Sessions — كل مشترك مستقل ─────────────────────────────────────────────────
 SESSIONS: dict = {}
 
+# الأزواج التي تعرضها الواجهة (نفلتر منها المتاح فعلياً في Quotex)
+SUPPORTED_ASSETS_OTC = [
+    "EURUSD_otc", "GBPUSD_otc", "AUDUSD_otc", "USDJPY_otc",
+    "EURJPY_otc", "GBPJPY_otc", "AUDCAD_otc", "USDCAD_otc",
+    "EURGBP_otc", "EURAUD_otc", "GBPAUD_otc", "NZDUSD_otc",
+]
+SUPPORTED_ASSETS_LIVE = [
+    "EURUSD", "GBPUSD", "AUDUSD", "USDJPY",
+    "EURJPY", "GBPJPY", "AUDCAD", "USDCAD",
+    "EURGBP", "EURAUD", "GBPAUD", "NZDUSD",
+]
+SUPPORTED_ASSETS_ALL = SUPPORTED_ASSETS_OTC + SUPPORTED_ASSETS_LIVE
+
 def new_session(email=""):
     return {
         "logged_in":      False,
@@ -851,6 +864,8 @@ def new_session(email=""):
         "status_msg":     "",   # رسالة للمشترك
         "_last_bal_sync_ts": 0.0,
         "login_error":    "",   # فشل connect بعد إرسال PIN (للعرض بدل مهلة صامتة)
+        "_assets_cache_ts": 0.0,
+        "_assets_cache":   None,
     }
 
 def _is_session_sim_mode(S: dict) -> bool:
@@ -1793,6 +1808,120 @@ async def _ensure_quotex_assets(client):
             await client.get_all_assets()
     except Exception as e:
         log.debug("get_all_assets: %s", e)
+
+
+def _as_bool_open(v):
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    if isinstance(v, str):
+        t = v.strip().lower()
+        if t in ("open", "opened", "true", "yes", "1"):
+            return True
+        if t in ("close", "closed", "false", "no", "0"):
+            return False
+    if isinstance(v, dict):
+        for k in ("open", "opened", "is_open", "available", "tradable", "status"):
+            if k in v:
+                b = _as_bool_open(v.get(k))
+                if b is not None:
+                    return b
+    return None
+
+
+def _extract_payout(v):
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        m = re.search(r"-?\d+(?:\.\d+)?", v)
+        if m:
+            return float(m.group(0))
+        return None
+    if isinstance(v, dict):
+        for k in ("payout", "profit", "percent", "value"):
+            if k in v:
+                p = _extract_payout(v.get(k))
+                if p is not None:
+                    return p
+    if isinstance(v, (list, tuple)):
+        for item in v:
+            p = _extract_payout(item)
+            if p is not None:
+                return p
+    return None
+
+
+async def _resolve_asset_trade_meta(client, asset: str):
+    open_hint = None
+    payout = None
+
+    try:
+        if hasattr(client, "check_asset_open"):
+            r = client.check_asset_open(asset)
+            if asyncio.iscoroutine(r):
+                r = await r
+            open_hint = _as_bool_open(r)
+    except Exception:
+        pass
+
+    try:
+        if hasattr(client, "get_payment"):
+            p = client.get_payment(asset)
+            if asyncio.iscoroutine(p):
+                p = await p
+            payout = _extract_payout(p)
+            if open_hint is None and payout is not None:
+                open_hint = payout > 0
+    except Exception:
+        pass
+
+    if open_hint is None:
+        codes = getattr(client, "codes_asset", None) or {}
+        open_hint = asset in codes
+
+    return bool(open_hint), payout
+
+
+async def _build_available_assets_payload(S: dict):
+    payload = {
+        "success": True,
+        "assets": {
+            "otc": list(SUPPORTED_ASSETS_OTC),
+            "live": list(SUPPORTED_ASSETS_LIVE),
+            "all": list(SUPPORTED_ASSETS_ALL),
+        },
+        "payouts": {},
+        "source": "fallback",
+        "updated_at": int(time.time()),
+    }
+
+    if not QX or not S.get("client"):
+        payload["source"] = "sim"
+        return payload
+
+    client = S["client"]
+    try:
+        await _ensure_quotex_assets(client)
+    except Exception:
+        pass
+
+    open_assets = []
+    payouts = {}
+    for a in SUPPORTED_ASSETS_ALL:
+        is_open, payout = await _resolve_asset_trade_meta(client, a)
+        if is_open:
+            open_assets.append(a)
+            if payout is not None:
+                payouts[a] = round(float(payout), 2)
+
+    otc = [a for a in open_assets if a.endswith("_otc")]
+    live = [a for a in open_assets if not a.endswith("_otc")]
+    payload["assets"] = {"otc": otc, "live": live, "all": open_assets}
+    payload["payouts"] = payouts
+    payload["source"] = "quotex"
+    payload["updated_at"] = int(time.time())
+    return payload
 
 
 async def _start_price_stream(client, asset):
@@ -3241,6 +3370,8 @@ async def login(req: LoginReq):
         S["real_balance"]=0.0; S["demo_balance"]=10_000.0; S["currency"]="USD"
     S["logged_in"]=True; S["needs_pin"]=False; S["email"]=email_key
     S["status_msg"] = ""
+    S["_assets_cache"] = None
+    S["_assets_cache_ts"] = 0.0
     return {"success":True,"needs_pin":False,"email":email_key,
             "user_id":abs(hash(email_key))%90_000_000+10_000_000,
             "real_balance":S["real_balance"],"demo_balance":S["demo_balance"],
@@ -3271,8 +3402,40 @@ async def logout(req: TokenReq):
             try: run_async_for(S.get("email","_"), _close(S["client"]),5)
             except: pass
         S.update({"logged_in":False,"needs_pin":False,"login_error":"","trades":[],"wins":0,
-                  "losses":0,"session_profit":0.0,"current_trade":None,"client":None})
+                  "losses":0,"session_profit":0.0,"current_trade":None,"client":None,
+                  "_assets_cache":None,"_assets_cache_ts":0.0})
     return {"success":True}
+
+
+@app.get("/api/assets")
+async def assets_ep(token: str = ""):
+    S = get_session(token)
+    if not S:
+        raise HTTPException(403, "جلسة غير صالحة")
+    if not S.get("logged_in"):
+        return {
+            "success": True,
+            "assets": {
+                "otc": list(SUPPORTED_ASSETS_OTC),
+                "live": list(SUPPORTED_ASSETS_LIVE),
+                "all": list(SUPPORTED_ASSETS_ALL),
+            },
+            "payouts": {},
+            "source": "pre-login",
+            "updated_at": int(time.time()),
+        }
+
+    now = time.time()
+    cache_ttl_sec = 20.0
+    cached = S.get("_assets_cache")
+    cached_ts = float(S.get("_assets_cache_ts", 0.0) or 0.0)
+    if isinstance(cached, dict) and (now - cached_ts) < cache_ttl_sec:
+        return cached
+
+    payload = await _build_available_assets_payload(S)
+    S["_assets_cache"] = payload
+    S["_assets_cache_ts"] = now
+    return payload
 
 @app.post("/api/bot/start")
 async def start(req: BotReq):
