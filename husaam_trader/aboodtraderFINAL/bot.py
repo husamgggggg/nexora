@@ -1833,9 +1833,17 @@ async def _build_available_assets_payload(S: dict):
     # قد تعيد تهيئة الاتصال وتؤثر على استقرار WebSocket الجاري.
     # نعتمد فقط على آخر codes_asset الموجودة بالذاكرة.
     codes = getattr(client, "codes_asset", None) or {}
-    known = set(k for k in codes.keys() if isinstance(k, str))
+    known = sorted(
+        {
+            k.strip()
+            for k in codes.keys()
+            if isinstance(k, str) and k.strip() and not k.startswith("_")
+        },
+        key=lambda x: x.lower(),
+    )
     if known:
-        open_assets = [a for a in SUPPORTED_ASSETS_ALL if a in known]
+        # اعرض كل أزواج المنصة الظاهرة في codes_asset (وليس قائمة ثابتة فقط)
+        open_assets = list(known)
         source = "quotex-codes-cache"
     else:
         open_assets = list(SUPPORTED_ASSETS_ALL)

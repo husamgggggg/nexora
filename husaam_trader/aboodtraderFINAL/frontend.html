@@ -766,7 +766,10 @@ function pairLabel(asset){return asset.replace('_otc',' OTC');}
 function pairPayout(asset){return `${s.assetPayout[asset]||80}%`;}
 function renderPairOption(asset){
   const [b,q]=pairFlags(asset);
-  return `<div class="oi-row"><div class="oi-main"><span class="oi-check">✓</span></div><div class="oi-main"><span class="oi-name">${pairLabel(asset)}</span><img class="oi-flag" src="https://flagcdn.com/w20/${b}.png" alt="${b}"><img class="oi-flag" src="https://flagcdn.com/w20/${q}.png" alt="${q}"></div></div>`;
+  const flags=(b!=='un'&&q!=='un')
+    ?`<img class="oi-flag" src="https://flagcdn.com/w20/${b}.png" alt="${b}"><img class="oi-flag" src="https://flagcdn.com/w20/${q}.png" alt="${q}">`
+    :'';
+  return `<div class="oi-row"><div class="oi-main"><span class="oi-check">✓</span></div><div class="oi-main"><span class="oi-name">${pairLabel(asset)}</span>${flags}</div></div>`;
 }
 async function api(path,method='GET',body=null){
   const url='/api'+path;
