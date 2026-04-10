@@ -1810,79 +1810,6 @@ async def _ensure_quotex_assets(client):
         log.debug("get_all_assets: %s", e)
 
 
-def _as_bool_open(v):
-    if isinstance(v, bool):
-        return v
-    if isinstance(v, (int, float)):
-        return bool(v)
-    if isinstance(v, str):
-        t = v.strip().lower()
-        if t in ("open", "opened", "true", "yes", "1"):
-            return True
-        if t in ("close", "closed", "false", "no", "0"):
-            return False
-    if isinstance(v, dict):
-        for k in ("open", "opened", "is_open", "available", "tradable", "status"):
-            if k in v:
-                b = _as_bool_open(v.get(k))
-                if b is not None:
-                    return b
-    return None
-
-
-def _extract_payout(v):
-    if isinstance(v, (int, float)):
-        return float(v)
-    if isinstance(v, str):
-        m = re.search(r"-?\d+(?:\.\d+)?", v)
-        if m:
-            return float(m.group(0))
-        return None
-    if isinstance(v, dict):
-        for k in ("payout", "profit", "percent", "value"):
-            if k in v:
-                p = _extract_payout(v.get(k))
-                if p is not None:
-                    return p
-    if isinstance(v, (list, tuple)):
-        for item in v:
-            p = _extract_payout(item)
-            if p is not None:
-                return p
-    return None
-
-
-async def _resolve_asset_trade_meta(client, asset: str):
-    open_hint = None
-    payout = None
-
-    try:
-        if hasattr(client, "check_asset_open"):
-            r = client.check_asset_open(asset)
-            if asyncio.iscoroutine(r):
-                r = await r
-            open_hint = _as_bool_open(r)
-    except Exception:
-        pass
-
-    try:
-        if hasattr(client, "get_payment"):
-            p = client.get_payment(asset)
-            if asyncio.iscoroutine(p):
-                p = await p
-            payout = _extract_payout(p)
-            if open_hint is None and payout is not None:
-                open_hint = payout > 0
-    except Exception:
-        pass
-
-    if open_hint is None:
-        codes = getattr(client, "codes_asset", None) or {}
-        open_hint = asset in codes
-
-    return bool(open_hint), payout
-
-
 async def _build_available_assets_payload(S: dict):
     payload = {
         "success": True,
@@ -1906,19 +1833,19 @@ async def _build_available_assets_payload(S: dict):
     except Exception:
         pass
 
-    open_assets = []
-    payouts = {}
-    for a in SUPPORTED_ASSETS_ALL:
-        is_open, payout = await _resolve_asset_trade_meta(client, a)
-        if is_open:
-            open_assets.append(a)
-            if payout is not None:
-                payouts[a] = round(float(payout), 2)
+    # مهم: لا نستدعي check_asset_open/get_payment لأنها قد تعيد تهيئة اتصال pyquotex
+    # وتؤثر على استقرار الـ WebSocket. نعتمد فقط على codes_asset الموجودة بعد get_all_assets.
+    codes = getattr(client, "codes_asset", None) or {}
+    known = set(k for k in codes.keys() if isinstance(k, str))
+    if known:
+        open_assets = [a for a in SUPPORTED_ASSETS_ALL if a in known]
+    else:
+        open_assets = list(SUPPORTED_ASSETS_ALL)
 
     otc = [a for a in open_assets if a.endswith("_otc")]
     live = [a for a in open_assets if not a.endswith("_otc")]
     payload["assets"] = {"otc": otc, "live": live, "all": open_assets}
-    payload["payouts"] = payouts
+    payload["payouts"] = {}
     payload["source"] = "quotex"
     payload["updated_at"] = int(time.time())
     return payload
