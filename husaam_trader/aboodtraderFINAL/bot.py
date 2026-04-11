@@ -8,7 +8,7 @@ NEXORA TRADE Bot — النسخة النهائية الكاملة
 ✅ متعدد المشتركين كل بحسابه المستقل
 ✅ إشعار عند تحقق الهدف
 """
-import asyncio, base64, html, json, logging, os, queue, random, re, socket, ssl, subprocess, sys
+import asyncio, base64, hashlib, html, json, logging, os, queue, random, re, socket, ssl, subprocess, sys
 import secrets, threading, time, traceback
 from contextlib import asynccontextmanager
 import urllib.parse
@@ -216,17 +216,25 @@ def _install_websocket_proxy_tunnel_auth_fix():
         wh.debug("Connecting proxy...")
         connect_header = f"CONNECT {host}:{port} HTTP/1.1\r\n"
         connect_header += f"Host: {host}:{port}\r\n"
+        connect_header += "Proxy-Connection: Keep-Alive\r\n"
         if auth:
             u = auth[0] if len(auth) > 0 and auth[0] is not None else ""
             p = auth[1] if len(auth) > 1 and auth[1] is not None else ""
             u, p = str(u), str(p)
             if u or p:
-                auth_str = f"{u}:{p}"
+                _, enc = _build_basic_proxy_auth(u, p)
+                enc = enc.strip().replace("\n", "")
                 try:
-                    ab = auth_str.encode("latin-1")
-                except UnicodeEncodeError:
-                    ab = auth_str.encode("utf-8")
-                enc = base64encode(ab).strip().decode().replace("\n", "")
+                    log.info(
+                        "WS proxy CONNECT auth | user_len=%s | user_fp=%s | pass_len=%s | pass_fp=%s | basic_fp=%s",
+                        len(u),
+                        _secret_fingerprint(u),
+                        len(p),
+                        _secret_fingerprint(p),
+                        _secret_fingerprint(enc),
+                    )
+                except Exception:
+                    pass
                 connect_header += f"Proxy-Authorization: Basic {enc}\r\n"
         connect_header += "\r\n"
         wh.dump("request header", connect_header)
@@ -282,6 +290,39 @@ def _strip_wrapping_quotes(s: str) -> str:
     if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
         return s[1:-1].strip()
     return s
+
+
+def _secret_fingerprint(value: str) -> str:
+    s = str(value or "")
+    if not s:
+        return "-"
+    return hashlib.sha256(s.encode("utf-8", errors="replace")).hexdigest()[:12]
+
+
+def _build_basic_proxy_auth(user: str, pwd: str):
+    auth_str = f"{user}:{pwd}"
+    try:
+        raw = auth_str.encode("latin-1")
+    except UnicodeEncodeError:
+        raw = auth_str.encode("utf-8")
+    token = base64.b64encode(raw).decode("ascii")
+    return auth_str, token
+
+
+def _log_ws_proxy_auth_resolution(source: str, user: str, pwd: str):
+    try:
+        _, basic_token = _build_basic_proxy_auth(user, pwd)
+        log.info(
+            "WS proxy auth resolved | source=%s | user_len=%s | user_fp=%s | pass_len=%s | pass_fp=%s | basic_fp=%s",
+            source or "unknown",
+            len(user or ""),
+            _secret_fingerprint(user),
+            len(pwd or ""),
+            _secret_fingerprint(pwd),
+            _secret_fingerprint(basic_token),
+        )
+    except Exception:
+        pass
 
 
 def _pick_proxy_url_for_ws(proxies: dict) -> str:
@@ -355,21 +396,25 @@ def _first_proxy_auth_from_env():
             continue
         creds = _extract_proxy_credentials_from_raw_url(raw)
         if creds and (creds[0] or creds[1]):
-            return creds
-    return None
+            return creds, key
+    return None, ""
 
 
 def _apply_ws_proxy_auth_env_overrides(user: str, pwd: str):
     eu = os.getenv("QUOTEX_WS_PROXY_USER", "").strip()
     ep = os.getenv("QUOTEX_WS_PROXY_PASSWORD", "").strip()
     al = os.getenv("QUOTEX_WS_PROXY_AUTH", "").strip()
+    source = ""
     if al and ":" in al:
         au, ap = al.split(":", 1)
         eu = eu or urllib.parse.unquote(au.strip())
         ep = ep or urllib.parse.unquote(ap)
+        source = "QUOTEX_WS_PROXY_AUTH"
+    if eu or ep:
+        source = "QUOTEX_WS_PROXY_USER/PASSWORD"
     if not eu and not ep:
-        return (user, pwd)
-    return (eu or user, ep or pwd)
+        return (user, pwd, source)
+    return (eu or user, ep or pwd, source)
 
 
 def _parse_ws_proxy_from_http_proxies(proxies):
@@ -416,15 +461,20 @@ def _parse_ws_proxy_from_http_proxies(proxies):
 
     user = urllib.parse.unquote(u.username) if u.username else ""
     pwd = urllib.parse.unquote(u.password) if u.password else ""
+    auth_source = "proxy_url_parsed" if (user or pwd) else ""
     if not user and not pwd:
         manual = _extract_proxy_credentials_from_raw_url(norm)
         if manual:
             user, pwd = manual
+            auth_source = "proxy_url_raw_userinfo"
     if not user and not pwd:
-        env_auth = _first_proxy_auth_from_env()
+        env_auth, env_key = _first_proxy_auth_from_env()
         if env_auth:
             user, pwd = env_auth
-    user, pwd = _apply_ws_proxy_auth_env_overrides(user, pwd)
+            auth_source = f"env:{env_key}"
+    user, pwd, override_source = _apply_ws_proxy_auth_env_overrides(user, pwd)
+    if override_source and (user or pwd):
+        auth_source = f"override:{override_source}"
 
     ws_proxy = {
         "http_proxy_host": host,
@@ -432,6 +482,7 @@ def _parse_ws_proxy_from_http_proxies(proxies):
         "proxy_type": ptype,
     }
     if user or pwd:
+        _log_ws_proxy_auth_resolution(auth_source or "unknown", user, pwd)
         ws_proxy["http_proxy_auth"] = (user, pwd)
     else:
         log.warning(
