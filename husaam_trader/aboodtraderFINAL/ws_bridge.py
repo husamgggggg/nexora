@@ -18,6 +18,7 @@
 import argparse
 import asyncio
 import base64
+import json
 import os
 import traceback
 import urllib.parse
@@ -131,6 +132,49 @@ def _cookie_domain_for_target_wss(target_url: str) -> str:
     return "." + host
 
 
+def _load_session_json_entry() -> Dict[str, Any]:
+    path = os.path.join(os.getcwd(), "session.json")
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    for _, entry in data.items():
+        if isinstance(entry, dict) and (
+            (entry.get("cookies") and str(entry.get("cookies")).strip())
+            or (entry.get("user_agent") and str(entry.get("user_agent")).strip())
+        ):
+            return entry
+    return {}
+
+
+def _cookie_header_for_bridge(headers: Dict[str, str]) -> Tuple[str, str]:
+    cookie_header = headers.get("Cookie") or headers.get("cookie") or ""
+    if cookie_header.strip():
+        return cookie_header, "local-handshake"
+    sess = _load_session_json_entry()
+    cookie_header = str(sess.get("cookies") or "").strip()
+    if cookie_header:
+        return cookie_header, "session.json"
+    return "", ""
+
+
+def _user_agent_for_bridge(headers: Dict[str, str], default_ua: str) -> str:
+    ua = headers.get("User-Agent") or headers.get("user-agent") or ""
+    if str(ua).strip():
+        return str(ua).strip()
+    sess = _load_session_json_entry()
+    ua = str(sess.get("user_agent") or "").strip()
+    if ua:
+        print("[Bridge] using user_agent from session.json", flush=True)
+        return ua
+    return default_ua
+
+
 async def _playwright_inject_session_cookies(
     context: Any, headers: Dict[str, str], target_url: str
 ) -> int:
@@ -138,11 +182,11 @@ async def _playwright_inject_session_cookies(
     بدون هذا: Chromium يفتح WSS بلا كوكيز جلسة pyquotex → إغلاق سريع (opcode=8) و
     Connection is already closed عند send_ssid.
     """
-    cookie_header = headers.get("Cookie") or headers.get("cookie") or ""
+    cookie_header, cookie_source = _cookie_header_for_bridge(headers)
     if not cookie_header.strip():
         print(
             "[Bridge] WARNING: no Cookie on local WS handshake — "
-            "set QUOTEX_USE_PLAYWRIGHT_BRIDGE=0 أو أضف حقن الكوكيز يدوياً",
+            "and no cookies in session.json",
             flush=True,
         )
         return 0
@@ -175,7 +219,7 @@ async def _playwright_inject_session_cookies(
             print(f"[Bridge] add_cookies(minimal) failed: {e2}", flush=True)
             return 0
     print(
-        f"[Bridge] injected {len(pairs)} cookie name(s) from pyquotex | domain={domain}",
+        f"[Bridge] injected {len(pairs)} cookie name(s) | source={cookie_source or 'unknown'} | domain={domain}",
         flush=True,
     )
     return len(pairs)
@@ -187,28 +231,25 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
     resolved_proxy = _resolve_proxy_url(proxy_url)
     proxy_cfg = _playwright_proxy_config(resolved_proxy)
     if proxy_cfg:
-        print(f"[Bridge] Playwright context proxy: {proxy_cfg.get('server')}", flush=True)
+        print(f"[Bridge] Playwright launch proxy: {proxy_cfg.get('server')}", flush=True)
     else:
         print("[Bridge] Playwright context: no proxy (same IP as VPS — may mismatch pyquotex login IP)", flush=True)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
-        )
+        launch_kw: Dict[str, Any] = {
+            "headless": True,
+            "args": ["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+        }
+        if proxy_cfg:
+            launch_kw["proxy"] = proxy_cfg
+        browser = await p.chromium.launch(**launch_kw)
         default_ua = (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/122.0.0.0 Safari/537.36"
         )
-        ua = (
-            client_headers.get("User-Agent")
-            or client_headers.get("user-agent")
-            or default_ua
-        )
+        ua = _user_agent_for_bridge(client_headers, default_ua)
         ctx_kw: Dict[str, Any] = {"user_agent": ua}
-        if proxy_cfg:
-            ctx_kw["proxy"] = proxy_cfg
         context = await browser.new_context(**ctx_kw)
         await _playwright_inject_session_cookies(context, client_headers, target_url)
         page = await context.new_page()
@@ -237,7 +278,10 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                     f"[Bridge] page.goto failed ({nav_err}) — fallback about:blank",
                     flush=True,
                 )
-                await page.goto("about:blank")
+                try:
+                    await page.goto("about:blank", wait_until="commit", timeout=5000)
+                except Exception as blank_err:
+                    print(f"[Bridge] about:blank fallback failed: {blank_err}", flush=True)
 
         async def emit_to_python(payload):
             """payload من JS: {k:'t', d: str} أو {k:'b', d: base64}"""
