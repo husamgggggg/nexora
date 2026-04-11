@@ -226,17 +226,130 @@ async def _playwright_inject_session_cookies(
 
 
 async def _wait_bridge_runtime_ready(page: Any, timeout_ms: int = 15000) -> None:
-    await page.wait_for_function(
-        """
-        () => Boolean(
-          window.__bridgeReady &&
-          typeof window.__bridgeSend === "function" &&
-          typeof window.__bridgeSendBin === "function" &&
-          typeof window.__connectTarget === "function"
+    try:
+        await page.wait_for_function(
+            """
+            () => Boolean(
+              window.__bridgeReady &&
+              typeof window.__bridgeSend === "function" &&
+              typeof window.__bridgeSendBin === "function" &&
+              typeof window.__connectTarget === "function"
+            )
+            """,
+            timeout=timeout_ms,
         )
-        """,
-        timeout=timeout_ms,
-    )
+    except Exception:
+        try:
+            state = await page.evaluate(
+                """
+                () => ({
+                  bridgeReady: Boolean(window.__bridgeReady),
+                  hasBridgeSend: typeof window.__bridgeSend === "function",
+                  hasBridgeSendBin: typeof window.__bridgeSendBin === "function",
+                  hasConnectTarget: typeof window.__connectTarget === "function",
+                  href: location.href,
+                  readyState: document.readyState,
+                })
+                """
+            )
+            print(f"[Bridge] runtime readiness snapshot: {state}", flush=True)
+        except Exception as snap_err:
+            print(f"[Bridge] runtime readiness snapshot failed: {snap_err}", flush=True)
+        raise
+
+
+_BRIDGE_RUNTIME_JS = r"""
+() => {
+  if (window.__bridgeRuntimeInstalled) {
+    return;
+  }
+  window.__bridgeRuntimeInstalled = true;
+  window.__targetWs = window.__targetWs || null;
+  window.__targetPending = window.__targetPending || [];
+
+  window.__bridgeSend = (txt) => {
+    if (window.__targetWs && window.__targetWs.readyState === 1) {
+      window.__targetWs.send(txt);
+    } else {
+      window.__targetPending.push({ type: "t", data: txt });
+    }
+  };
+
+  window.__bridgeSendBin = (b64) => {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    if (window.__targetWs && window.__targetWs.readyState === 1) {
+      window.__targetWs.send(bytes.buffer);
+    } else {
+      window.__targetPending.push({ type: "b", data: b64 });
+    }
+  };
+
+  const flushPending = () => {
+    if (!window.__targetWs || window.__targetWs.readyState !== 1) return;
+    while (window.__targetPending.length > 0) {
+      const item = window.__targetPending.shift();
+      if (item.type === "b") {
+        const raw = atob(item.data);
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        window.__targetWs.send(bytes.buffer);
+      } else {
+        window.__targetWs.send(item.data);
+      }
+    }
+  };
+
+  window.__connectTarget = (targetUrl) => {
+    const ws = new WebSocket(targetUrl);
+    window.__targetWs = ws;
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => {
+      window.__bridgeEmit({ k: "t", d: "__WS_OPEN__" });
+      flushPending();
+    };
+    ws.onclose = (event) => {
+      const reason = event && typeof event.reason === "string" ? event.reason : "";
+      const code = event && typeof event.code === "number" ? event.code : 0;
+      const clean = Boolean(event && event.wasClean);
+      window.__bridgeEmit({ k: "t", d: `__WS_CLOSE__|code=${code}|reason=${reason}|clean=${clean}` });
+      setTimeout(() => window.__connectTarget(targetUrl), 1200);
+    };
+    ws.onerror = () => {
+      const rs = ws ? ws.readyState : -1;
+      window.__bridgeEmit({ k: "t", d: `__WS_ERROR__|readyState=${rs}` });
+    };
+    ws.onmessage = async (event) => {
+      try {
+        if (typeof event.data === "string") {
+          window.__bridgeEmit({ k: "t", d: event.data });
+          return;
+        }
+        let ab;
+        if (event.data instanceof ArrayBuffer) {
+          ab = event.data;
+        } else if (event.data instanceof Blob) {
+          ab = await event.data.arrayBuffer();
+        } else {
+          window.__bridgeEmit({ k: "t", d: String(event.data) });
+          return;
+        }
+        const bytes = new Uint8Array(ab);
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        window.__bridgeEmit({ k: "b", d: btoa(binary) });
+      } catch (e) {
+        window.__bridgeEmit({ k: "t", d: "__WS_BRIDGE_ERR__" });
+      }
+    };
+  };
+
+  window.__bridgeReady = true;
+}
+"""
 
 
 async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
@@ -266,98 +379,9 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
         ctx_kw: Dict[str, Any] = {"user_agent": ua}
         context = await browser.new_context(**ctx_kw)
         await _playwright_inject_session_cookies(context, client_headers, target_url)
-        await context.add_init_script(
-            """
-            () => {
-              window.__targetWs = null;
-              window.__targetPending = [];
-              window.__bridgeReady = true;
-
-              window.__bridgeSend = (txt) => {
-                if (window.__targetWs && window.__targetWs.readyState === 1) {
-                  window.__targetWs.send(txt);
-                } else {
-                  window.__targetPending.push({ type: "t", data: txt });
-                }
-              };
-
-              window.__bridgeSendBin = (b64) => {
-                const bin = atob(b64);
-                const bytes = new Uint8Array(bin.length);
-                for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-                if (window.__targetWs && window.__targetWs.readyState === 1) {
-                  window.__targetWs.send(bytes.buffer);
-                } else {
-                  window.__targetPending.push({ type: "b", data: b64 });
-                }
-              };
-
-              const flushPending = () => {
-                if (!window.__targetWs || window.__targetWs.readyState !== 1) return;
-                while (window.__targetPending.length > 0) {
-                  const item = window.__targetPending.shift();
-                  if (item.type === "b") {
-                    const raw = atob(item.data);
-                    const bytes = new Uint8Array(raw.length);
-                    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-                    window.__targetWs.send(bytes.buffer);
-                  } else {
-                    window.__targetWs.send(item.data);
-                  }
-                }
-              };
-
-              const connectTarget = (targetUrl) => {
-                const ws = new WebSocket(targetUrl);
-                window.__targetWs = ws;
-                ws.binaryType = "arraybuffer";
-                ws.onopen = () => {
-                  window.__bridgeEmit({ k: "t", d: "__WS_OPEN__" });
-                  flushPending();
-                };
-                ws.onclose = (event) => {
-                  const reason = event && typeof event.reason === "string" ? event.reason : "";
-                  const code = event && typeof event.code === "number" ? event.code : 0;
-                  const clean = Boolean(event && event.wasClean);
-                  window.__bridgeEmit({ k: "t", d: `__WS_CLOSE__|code=${code}|reason=${reason}|clean=${clean}` });
-                  setTimeout(() => connectTarget(targetUrl), 1200);
-                };
-                ws.onerror = () => {
-                  const rs = ws ? ws.readyState : -1;
-                  window.__bridgeEmit({ k: "t", d: `__WS_ERROR__|readyState=${rs}` });
-                };
-                ws.onmessage = async (event) => {
-                  try {
-                    if (typeof event.data === "string") {
-                      window.__bridgeEmit({ k: "t", d: event.data });
-                      return;
-                    }
-                    let ab;
-                    if (event.data instanceof ArrayBuffer) {
-                      ab = event.data;
-                    } else if (event.data instanceof Blob) {
-                      ab = await event.data.arrayBuffer();
-                    } else {
-                      window.__bridgeEmit({ k: "t", d: String(event.data) });
-                      return;
-                    }
-                    const bytes = new Uint8Array(ab);
-                    let binary = "";
-                    for (let i = 0; i < bytes.length; i++) {
-                      binary += String.fromCharCode(bytes[i]);
-                    }
-                    window.__bridgeEmit({ k: "b", d: btoa(binary) });
-                  } catch (e) {
-                    window.__bridgeEmit({ k: "t", d: "__WS_BRIDGE_ERR__" });
-                  }
-                };
-              };
-
-              window.__connectTarget = connectTarget;
-            }
-            """
-        )
+        await context.add_init_script(_BRIDGE_RUNTIME_JS)
         page = await context.new_page()
+        await page.add_init_script(_BRIDGE_RUNTIME_JS)
         async def emit_to_python(payload):
             """payload من JS: {k:'t', d: str} أو {k:'b', d: base64}"""
             try:
@@ -375,6 +399,7 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                 print(traceback.format_exc())
 
         await page.expose_function("__bridgeEmit", emit_to_python)
+        await page.evaluate(_BRIDGE_RUNTIME_JS)
         # عبر بروكسي سكني قد يتأخر domcontentloaded دقائق؛ «commit» أسرع. بدون صفحة يصلح Origin أحياناً.
         nav_url = (os.environ.get("QUOTEX_BRIDGE_NAV_URL") or "https://qxbroker.com").strip()
         skip_nav = os.environ.get("QUOTEX_BRIDGE_SKIP_PAGE_NAV", "").strip().lower() in (
