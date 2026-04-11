@@ -8,7 +8,7 @@ NEXORA TRADE Bot — النسخة النهائية الكاملة
 ✅ متعدد المشتركين كل بحسابه المستقل
 ✅ إشعار عند تحقق الهدف
 """
-import asyncio, base64, html, json, logging, os, queue, random, re, socket, ssl, subprocess
+import asyncio, base64, html, json, logging, os, queue, random, re, socket, ssl, subprocess, sys
 import secrets, threading, time, traceback
 from contextlib import asynccontextmanager
 import urllib.parse
@@ -505,8 +505,10 @@ def _ensure_playwright_bridge(target_ws_url: str):
         return f"ws://127.0.0.1:{_PW_BRIDGE_PORT}"
 
     port = _pick_free_port()
+    # systemd غالباً لا يضع `python` في PATH — نفس مفسّر bot.py (venv) يضمن تشغيل ws_bridge.
+    py_exe = (os.getenv("PYTHON_BIN") or "").strip() or sys.executable
     cmd = [
-        os.getenv("PYTHON_BIN", "python"),
+        py_exe,
         bridge_file,
         "--listen-host",
         "127.0.0.1",
