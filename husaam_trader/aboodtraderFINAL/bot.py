@@ -178,6 +178,15 @@ logging.basicConfig(
 )
 log = logging.getLogger("NexoraTrade")
 
+# تشخيص: قيم الجسر من البيئة الفعلية لعملية bot (systemd ≠ شِل تفاعلي؛ راجع EnvironmentFile في الخدمة).
+_raw_qx_bridge = os.getenv("QUOTEX_USE_PLAYWRIGHT_BRIDGE")
+USE_QX_BRIDGE = os.getenv("QUOTEX_USE_PLAYWRIGHT_BRIDGE", "0").strip() == "1"
+USE_QX_BRIDGE_CODEPATH = (_raw_qx_bridge or "").strip().lower() in ("1", "true", "yes", "on")
+log.info("ENV QUOTEX_USE_PLAYWRIGHT_BRIDGE raw=%r", _raw_qx_bridge)
+log.info("ENV QUOTEX_USE_PLAYWRIGHT_BRIDGE parsed=%s", USE_QX_BRIDGE)
+log.info("ENV QUOTEX_USE_PLAYWRIGHT_BRIDGE parsed_like_start_websocket=%s", USE_QX_BRIDGE_CODEPATH)
+log.info("ENV QUOTEX_PROXY_URL raw_present=%s", bool(os.getenv("QUOTEX_PROXY_URL")))
+
 if _QX_IMPORT_ERR is not None:
     log.warning("pyquotex غير محمّل — وضع محاكاة. السبب: %s", _QX_IMPORT_ERR)
 
