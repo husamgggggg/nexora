@@ -225,6 +225,20 @@ async def _playwright_inject_session_cookies(
     return len(pairs)
 
 
+async def _wait_bridge_runtime_ready(page: Any, timeout_ms: int = 15000) -> None:
+    await page.wait_for_function(
+        """
+        () => Boolean(
+          window.__bridgeReady &&
+          typeof window.__bridgeSend === "function" &&
+          typeof window.__bridgeSendBin === "function" &&
+          typeof window.__connectTarget === "function"
+        )
+        """,
+        timeout=timeout_ms,
+    )
+
+
 async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
     outbound = asyncio.Queue()
     client_headers = _incoming_ws_request_headers(client_ws)
@@ -252,60 +266,12 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
         ctx_kw: Dict[str, Any] = {"user_agent": ua}
         context = await browser.new_context(**ctx_kw)
         await _playwright_inject_session_cookies(context, client_headers, target_url)
-        page = await context.new_page()
-        # عبر بروكسي سكني قد يتأخر domcontentloaded دقائق؛ «commit» أسرع. بدون صفحة يصلح Origin أحياناً.
-        nav_url = (os.environ.get("QUOTEX_BRIDGE_NAV_URL") or "https://qxbroker.com").strip()
-        skip_nav = os.environ.get("QUOTEX_BRIDGE_SKIP_PAGE_NAV", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
-        try:
-            nav_timeout = int(os.environ.get("QUOTEX_BRIDGE_NAV_TIMEOUT_MS", "90000") or 90000)
-        except ValueError:
-            nav_timeout = 90000
-        nav_timeout = max(5000, min(nav_timeout, 300000))
-        if skip_nav or not nav_url:
-            await page.goto("about:blank")
-            print("[Bridge] page: about:blank (skip nav أو URL فارغ)", flush=True)
-        else:
-            try:
-                await page.goto(nav_url, wait_until="commit", timeout=nav_timeout)
-                print(f"[Bridge] page: committed {nav_url}", flush=True)
-            except Exception as nav_err:
-                print(
-                    f"[Bridge] page.goto failed ({nav_err}) — fallback about:blank",
-                    flush=True,
-                )
-                try:
-                    await page.goto("about:blank", wait_until="commit", timeout=5000)
-                except Exception as blank_err:
-                    print(f"[Bridge] about:blank fallback failed: {blank_err}", flush=True)
-
-        async def emit_to_python(payload):
-            """payload من JS: {k:'t', d: str} أو {k:'b', d: base64}"""
-            try:
-                if not isinstance(payload, dict):
-                    await outbound.put(("str", str(payload)))
-                    return
-                kind = payload.get("k")
-                if kind == "b":
-                    raw = base64.b64decode(payload.get("d") or "")
-                    await outbound.put(("bin", raw))
-                else:
-                    await outbound.put(("str", payload.get("d") or ""))
-            except Exception:
-                print("[Bridge] emit_to_python failed")
-                print(traceback.format_exc())
-
-        await page.expose_function("__bridgeEmit", emit_to_python)
-
-        await page.evaluate(
+        await context.add_init_script(
             """
             () => {
               window.__targetWs = null;
               window.__targetPending = [];
+              window.__bridgeReady = true;
 
               window.__bridgeSend = (txt) => {
                 if (window.__targetWs && window.__targetWs.readyState === 1) {
@@ -349,12 +315,16 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                   window.__bridgeEmit({ k: "t", d: "__WS_OPEN__" });
                   flushPending();
                 };
-                ws.onclose = () => {
-                  window.__bridgeEmit({ k: "t", d: "__WS_CLOSE__" });
+                ws.onclose = (event) => {
+                  const reason = event && typeof event.reason === "string" ? event.reason : "";
+                  const code = event && typeof event.code === "number" ? event.code : 0;
+                  const clean = Boolean(event && event.wasClean);
+                  window.__bridgeEmit({ k: "t", d: `__WS_CLOSE__|code=${code}|reason=${reason}|clean=${clean}` });
                   setTimeout(() => connectTarget(targetUrl), 1200);
                 };
                 ws.onerror = () => {
-                  window.__bridgeEmit({ k: "t", d: "__WS_ERROR__" });
+                  const rs = ws ? ws.readyState : -1;
+                  window.__bridgeEmit({ k: "t", d: `__WS_ERROR__|readyState=${rs}` });
                 };
                 ws.onmessage = async (event) => {
                   try {
@@ -387,12 +357,60 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
             }
             """
         )
+        page = await context.new_page()
+        async def emit_to_python(payload):
+            """payload من JS: {k:'t', d: str} أو {k:'b', d: base64}"""
+            try:
+                if not isinstance(payload, dict):
+                    await outbound.put(("str", str(payload)))
+                    return
+                kind = payload.get("k")
+                if kind == "b":
+                    raw = base64.b64decode(payload.get("d") or "")
+                    await outbound.put(("bin", raw))
+                else:
+                    await outbound.put(("str", payload.get("d") or ""))
+            except Exception:
+                print("[Bridge] emit_to_python failed")
+                print(traceback.format_exc())
 
+        await page.expose_function("__bridgeEmit", emit_to_python)
+        # عبر بروكسي سكني قد يتأخر domcontentloaded دقائق؛ «commit» أسرع. بدون صفحة يصلح Origin أحياناً.
+        nav_url = (os.environ.get("QUOTEX_BRIDGE_NAV_URL") or "https://qxbroker.com").strip()
+        skip_nav = os.environ.get("QUOTEX_BRIDGE_SKIP_PAGE_NAV", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        try:
+            nav_timeout = int(os.environ.get("QUOTEX_BRIDGE_NAV_TIMEOUT_MS", "90000") or 90000)
+        except ValueError:
+            nav_timeout = 90000
+        nav_timeout = max(5000, min(nav_timeout, 300000))
+        if skip_nav or not nav_url:
+            await page.goto("about:blank")
+            print("[Bridge] page: about:blank (skip nav أو URL فارغ)", flush=True)
+        else:
+            try:
+                await page.goto(nav_url, wait_until="commit", timeout=nav_timeout)
+                print(f"[Bridge] page: committed {nav_url}", flush=True)
+            except Exception as nav_err:
+                print(
+                    f"[Bridge] page.goto failed ({nav_err}) — fallback about:blank",
+                    flush=True,
+                )
+                try:
+                    await page.goto("about:blank", wait_until="commit", timeout=5000)
+                except Exception as blank_err:
+                    print(f"[Bridge] about:blank fallback failed: {blank_err}", flush=True)
+        await _wait_bridge_runtime_ready(page)
         await page.evaluate("(targetUrl) => window.__connectTarget(targetUrl)", target_url)
 
         async def from_local_client():
             async for msg in client_ws:
                 try:
+                    await _wait_bridge_runtime_ready(page, timeout_ms=5000)
                     if isinstance(msg, (bytes, bytearray)):
                         b64 = base64.b64encode(bytes(msg)).decode("ascii")
                         await page.evaluate("(b64) => window.__bridgeSendBin(b64)", b64)
@@ -412,11 +430,11 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                     if data == "__WS_OPEN__":
                         print("[Bridge] upstream Quotex WebSocket OPEN", flush=True)
                         continue
-                    if data == "__WS_CLOSE__":
-                        print("[Bridge] upstream Quotex WebSocket CLOSE", flush=True)
+                    if data.startswith("__WS_CLOSE__"):
+                        print(f"[Bridge] upstream Quotex WebSocket CLOSE {data}", flush=True)
                         continue
-                    if data == "__WS_ERROR__":
-                        print("[Bridge] upstream Quotex WebSocket ERROR", flush=True)
+                    if data.startswith("__WS_ERROR__"):
+                        print(f"[Bridge] upstream Quotex WebSocket ERROR {data}", flush=True)
                         continue
                     if data == "__WS_BRIDGE_ERR__":
                         continue
