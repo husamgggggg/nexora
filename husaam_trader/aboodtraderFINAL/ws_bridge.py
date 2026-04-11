@@ -11,6 +11,9 @@
 
 يُمرَّر عبر ``--proxy-url`` من bot.py أو من البيئة:
 ``QUOTEX_WS_BRIDGE_PROXY`` ثم ``QUOTEX_PROXY_URL`` ثم ``HTTPS_PROXY`` / ``HTTP_PROXY``.
+
+كوكيز جلسة pyquotex تُقرأ من رأس ``Cookie`` في اتصال WebSocket المحلي وتُحقَن في Chromium
+(بدونها قد يُغلق الـ WSS فوراً ويظهر ``Connection is already closed`` عند ``send_ssid``).
 """
 import argparse
 import asyncio
@@ -18,7 +21,7 @@ import base64
 import os
 import traceback
 import urllib.parse
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import websockets
 from playwright.async_api import async_playwright
@@ -76,8 +79,111 @@ def _playwright_proxy_config(proxy_url: str) -> Optional[Dict[str, Any]]:
     return cfg
 
 
+def _incoming_ws_request_headers(ws: Any) -> Dict[str, str]:
+    """رؤوس ترقية WebSocket من عميل websockets (Cookie/User-Agent من pyquotex)."""
+    out: Dict[str, str] = {}
+    try:
+        req = getattr(ws, "request", None)
+        if req is not None:
+            hs = getattr(req, "headers", None)
+            if hs is not None:
+                for k, v in hs.items():
+                    out[str(k)] = str(v)
+                return out
+    except Exception:
+        pass
+    try:
+        rh = getattr(ws, "request_headers", None)
+        if rh is not None:
+            for k, v in rh.items():
+                out[str(k)] = str(v)
+    except Exception:
+        pass
+    return out
+
+
+def _parse_cookie_header_pairs(cookie_header: str) -> List[Tuple[str, str]]:
+    pairs: List[Tuple[str, str]] = []
+    for part in (cookie_header or "").split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        k, v = part.split("=", 1)
+        k, v = k.strip(), v.strip()
+        if k:
+            pairs.append((k, v))
+    return pairs
+
+
+def _cookie_domain_for_target_wss(target_url: str) -> str:
+    env_d = (os.environ.get("QUOTEX_BRIDGE_COOKIE_DOMAIN") or "").strip()
+    if env_d:
+        return env_d if env_d.startswith(".") else f".{env_d.lstrip('.')}"
+    try:
+        host = (urllib.parse.urlparse(target_url).hostname or "").lower()
+    except Exception:
+        host = ""
+    if not host:
+        return ".qxbroker.com"
+    parts = host.split(".")
+    if len(parts) >= 2:
+        return "." + ".".join(parts[-2:])
+    return "." + host
+
+
+async def _playwright_inject_session_cookies(
+    context: Any, headers: Dict[str, str], target_url: str
+) -> int:
+    """
+    بدون هذا: Chromium يفتح WSS بلا كوكيز جلسة pyquotex → إغلاق سريع (opcode=8) و
+    Connection is already closed عند send_ssid.
+    """
+    cookie_header = headers.get("Cookie") or headers.get("cookie") or ""
+    if not cookie_header.strip():
+        print(
+            "[Bridge] WARNING: no Cookie on local WS handshake — "
+            "set QUOTEX_USE_PLAYWRIGHT_BRIDGE=0 أو أضف حقن الكوكيز يدوياً",
+            flush=True,
+        )
+        return 0
+    domain = _cookie_domain_for_target_wss(target_url)
+    pairs = _parse_cookie_header_pairs(cookie_header)
+    if not pairs:
+        return 0
+    full = []
+    for name, value in pairs:
+        full.append(
+            {
+                "name": name,
+                "value": value,
+                "domain": domain,
+                "path": "/",
+                "secure": True,
+                "sameSite": "Lax",
+            }
+        )
+    try:
+        await context.add_cookies(full)
+    except Exception as e:
+        print(f"[Bridge] add_cookies(full) failed ({e}); retry minimal", flush=True)
+        try:
+            minimal = [
+                {"name": n, "value": v, "domain": domain, "path": "/"} for n, v in pairs
+            ]
+            await context.add_cookies(minimal)
+        except Exception as e2:
+            print(f"[Bridge] add_cookies(minimal) failed: {e2}", flush=True)
+            return 0
+    print(
+        f"[Bridge] injected {len(pairs)} cookie name(s) from pyquotex | domain={domain}",
+        flush=True,
+    )
+    return len(pairs)
+
+
 async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
     outbound = asyncio.Queue()
+    client_headers = _incoming_ws_request_headers(client_ws)
     resolved_proxy = _resolve_proxy_url(proxy_url)
     proxy_cfg = _playwright_proxy_config(resolved_proxy)
     if proxy_cfg:
@@ -90,16 +196,21 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
             headless=True,
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
         )
-        ctx_kw: Dict[str, Any] = {
-            "user_agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            )
-        }
+        default_ua = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        )
+        ua = (
+            client_headers.get("User-Agent")
+            or client_headers.get("user-agent")
+            or default_ua
+        )
+        ctx_kw: Dict[str, Any] = {"user_agent": ua}
         if proxy_cfg:
             ctx_kw["proxy"] = proxy_cfg
         context = await browser.new_context(**ctx_kw)
+        await _playwright_inject_session_cookies(context, client_headers, target_url)
         page = await context.new_page()
         # عبر بروكسي سكني قد يتأخر domcontentloaded دقائق؛ «commit» أسرع. بدون صفحة يصلح Origin أحياناً.
         nav_url = (os.environ.get("QUOTEX_BRIDGE_NAV_URL") or "https://qxbroker.com").strip()
