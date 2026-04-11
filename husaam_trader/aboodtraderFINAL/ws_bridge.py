@@ -259,7 +259,7 @@ async def _wait_bridge_runtime_ready(page: Any, timeout_ms: int = 15000) -> None
 
 
 _BRIDGE_RUNTIME_JS = r"""
-() => {
+(() => {
   if (window.__bridgeRuntimeInstalled) {
     return;
   }
@@ -348,7 +348,7 @@ _BRIDGE_RUNTIME_JS = r"""
   };
 
   window.__bridgeReady = true;
-}
+})();
 """
 
 
