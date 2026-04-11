@@ -492,6 +492,137 @@ def _parse_ws_proxy_from_http_proxies(proxies):
     return ws_proxy
 
 
+def _recv_until_http_headers_end(sock_obj, max_bytes: int = 65536) -> bytes:
+    buf = bytearray()
+    while b"\r\n\r\n" not in buf:
+        chunk = sock_obj.recv(4096)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise ValueError("HTTP proxy response headers too large")
+    return bytes(buf)
+
+
+def _parse_http_connect_response(raw: bytes):
+    head = raw.split(b"\r\n\r\n", 1)[0]
+    text = head.decode("iso-8859-1", errors="replace")
+    lines = text.split("\r\n")
+    status_line = lines[0] if lines else ""
+    parts = status_line.split(" ", 2)
+    try:
+        status = int(parts[1]) if len(parts) > 1 else 0
+    except Exception:
+        status = 0
+    headers = {}
+    for line in lines[1:]:
+        if ":" not in line:
+            continue
+        k, v = line.split(":", 1)
+        headers[k.strip().lower()] = v.strip()
+    return status, status_line, headers
+
+
+def _open_manual_http_connect_tunnel(target_host: str, target_port: int, proxy_conf: dict):
+    px_host = str(proxy_conf.get("http_proxy_host") or "").strip()
+    px_port = int(proxy_conf.get("http_proxy_port") or 0)
+    auth = proxy_conf.get("http_proxy_auth")
+    if not px_host or not px_port:
+        raise ValueError("Manual CONNECT requires http proxy host/port")
+
+    log.info(
+        "WS manual CONNECT start | proxy=%s:%s | target=%s:%s",
+        px_host,
+        px_port,
+        target_host,
+        target_port,
+    )
+    sock_obj = socket.create_connection((px_host, px_port), timeout=15)
+    try:
+        sock_obj.settimeout(20)
+    except Exception:
+        pass
+
+    req = [
+        f"CONNECT {target_host}:{target_port} HTTP/1.1",
+        f"Host: {target_host}:{target_port}",
+        "Proxy-Connection: Keep-Alive",
+        "User-Agent: curl/7.81.0",
+    ]
+    if auth:
+        u = auth[0] if len(auth) > 0 and auth[0] is not None else ""
+        p = auth[1] if len(auth) > 1 and auth[1] is not None else ""
+        u, p = str(u), str(p)
+        if u or p:
+            _, basic_token = _build_basic_proxy_auth(u, p)
+            log.info(
+                "WS manual CONNECT auth | user_len=%s | user_fp=%s | pass_len=%s | pass_fp=%s | basic_fp=%s",
+                len(u),
+                _secret_fingerprint(u),
+                len(p),
+                _secret_fingerprint(p),
+                _secret_fingerprint(basic_token),
+            )
+            req.append(f"Proxy-Authorization: Basic {basic_token}")
+    payload = ("\r\n".join(req) + "\r\n\r\n").encode("iso-8859-1", errors="replace")
+    sock_obj.sendall(payload)
+    raw_resp = _recv_until_http_headers_end(sock_obj)
+    status, status_line, headers = _parse_http_connect_response(raw_resp)
+    proxy_www = str(headers.get("proxy-authenticate") or headers.get("www-authenticate") or "").strip()[:220]
+    if status != 200:
+        try:
+            sock_obj.close()
+        except Exception:
+            pass
+        log.warning(
+            "WS manual CONNECT failed | status=%s | status_line=%s | proxy_www=%s",
+            status,
+            status_line or "-",
+            proxy_www or "-",
+        )
+        raise RuntimeError(f"manual CONNECT failed via proxy status: {status or status_line or 'unknown'}")
+    log.info(
+        "WS manual CONNECT ok | status=%s | status_line=%s",
+        status,
+        status_line or "HTTP/1.1 200 Connection Established",
+    )
+    return sock_obj
+
+
+def _build_preconnected_wss_socket(ws_url: str, sslopt: dict, proxy_conf: dict):
+    parsed = urllib.parse.urlparse(ws_url or "")
+    target_host = parsed.hostname or ""
+    target_port = int(parsed.port or (443 if (parsed.scheme or "").lower() == "wss" else 80))
+    if not target_host:
+        raise ValueError("Cannot resolve WebSocket target host for manual CONNECT")
+
+    plain_sock = _open_manual_http_connect_tunnel(target_host, target_port, proxy_conf)
+    if (parsed.scheme or "").lower() != "wss":
+        return plain_sock
+
+    ctx = sslopt.get("context")
+    if ctx is None:
+        ctx = ssl.create_default_context()
+        if sslopt.get("check_hostname") is False:
+            ctx.check_hostname = False
+        cert_reqs = sslopt.get("cert_reqs")
+        if cert_reqs is not None:
+            ctx.verify_mode = cert_reqs
+        ca_certs = sslopt.get("ca_certs")
+        if ca_certs:
+            try:
+                ctx.load_verify_locations(ca_certs)
+            except Exception:
+                pass
+    tls_sock = ctx.wrap_socket(plain_sock, server_hostname=target_host)
+    try:
+        tls_sock.settimeout(20)
+    except Exception:
+        pass
+    log.info("WS manual TLS wrap ok | host=%s | port=%s", target_host, target_port)
+    return tls_sock
+
+
 # ========== الحل البرمجي الجذري لتجاوز Cloudflare WebSocket ==========
 # ملاحظة: هذا القسم اختياري/احتياطي. إذا لم تتوفر المكتبات المطلوبة، يُتخطّى تلقائياً.
 def is_cloudflare_ws_failure(error) -> bool:
@@ -894,18 +1025,38 @@ def _install_pyquotex_ws_proxy_patch(proxies):
                 p_pres,
                 px_type,
             )
-            payload["http_proxy_host"] = px_host
-            payload["http_proxy_port"] = px_port
-            payload["proxy_type"] = px_type
-            if u_pres or p_pres:
-                u0 = str(auth_t[0]).strip() if auth_t and len(auth_t) > 0 and auth_t[0] is not None else ""
-                p0 = (
-                    str(auth_t[1])
-                    if auth_t and len(auth_t) > 1 and auth_t[1] is not None
-                    else ""
-                )
-                payload["http_proxy_auth"] = (u0, p0)
+            self.websocket.prepared_socket = None
+            use_manual_tunnel = px_type == "http" and bool(px_host and px_port)
+            if use_manual_tunnel:
+                try:
+                    self.websocket.prepared_socket = _build_preconnected_wss_socket(
+                        getattr(self.websocket, "url", "") or "",
+                        sslopt,
+                        ws_proxy,
+                    )
+                    log.info("WS direct using manual CONNECT tunnel via preinitialized socket")
+                except Exception as e:
+                    self.websocket.prepared_socket = None
+                    log.warning("WS manual CONNECT unavailable, fallback to websocket-client proxy path: %s", e)
+                    use_manual_tunnel = False
+            if not use_manual_tunnel:
+                payload["http_proxy_host"] = px_host
+                payload["http_proxy_port"] = px_port
+                payload["proxy_type"] = px_type
+                if u_pres or p_pres:
+                    u0 = str(auth_t[0]).strip() if auth_t and len(auth_t) > 0 and auth_t[0] is not None else ""
+                    p0 = (
+                        str(auth_t[1])
+                        if auth_t and len(auth_t) > 1 and auth_t[1] is not None
+                        else ""
+                    )
+                    payload["http_proxy_auth"] = (u0, p0)
+                else:
+                    payload.pop("http_proxy_auth", None)
             else:
+                payload.pop("http_proxy_host", None)
+                payload.pop("http_proxy_port", None)
+                payload.pop("proxy_type", None)
                 payload.pop("http_proxy_auth", None)
 
         self.websocket_thread = _qx_api_mod.threading.Thread(
