@@ -354,6 +354,7 @@ _BRIDGE_RUNTIME_JS = r"""
 
 async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
     outbound = asyncio.Queue()
+    upstream_open = asyncio.Event()
     client_headers = _incoming_ws_request_headers(client_ws)
     resolved_proxy = _resolve_proxy_url(proxy_url)
     proxy_cfg = _playwright_proxy_config(resolved_proxy)
@@ -435,6 +436,13 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
         async def from_local_client():
             async for msg in client_ws:
                 try:
+                    if not upstream_open.is_set():
+                        try:
+                            await asyncio.wait_for(upstream_open.wait(), timeout=8.0)
+                            print("[Bridge] upstream ready; releasing local queued traffic", flush=True)
+                        except asyncio.TimeoutError:
+                            print("[Bridge] upstream open timeout before local send", flush=True)
+                            return
                     await _wait_bridge_runtime_ready(page, timeout_ms=5000)
                     if isinstance(msg, (bytes, bytearray)):
                         b64 = base64.b64encode(bytes(msg)).decode("ascii")
@@ -454,6 +462,7 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                 if kind == "str":
                     if data == "__WS_OPEN__":
                         print("[Bridge] upstream Quotex WebSocket OPEN", flush=True)
+                        upstream_open.set()
                         continue
                     if data.startswith("__WS_CLOSE__"):
                         print(f"[Bridge] upstream Quotex WebSocket CLOSE {data}", flush=True)
