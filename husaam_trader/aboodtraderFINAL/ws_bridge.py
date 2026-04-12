@@ -11,18 +11,14 @@
 
 يُمرَّر عبر ``--proxy-url`` من bot.py أو من البيئة:
 ``QUOTEX_WS_BRIDGE_PROXY`` ثم ``QUOTEX_PROXY_URL`` ثم ``HTTPS_PROXY`` / ``HTTP_PROXY``.
-
-كوكيز جلسة pyquotex تُقرأ من رأس ``Cookie`` في اتصال WebSocket المحلي وتُحقَن في Chromium
-(بدونها قد يُغلق الـ WSS فوراً ويظهر ``Connection is already closed`` عند ``send_ssid``).
 """
 import argparse
 import asyncio
 import base64
-import json
 import os
 import traceback
 import urllib.parse
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import websockets
 from playwright.async_api import async_playwright
@@ -80,531 +76,58 @@ def _playwright_proxy_config(proxy_url: str) -> Optional[Dict[str, Any]]:
     return cfg
 
 
-def _incoming_ws_request_headers(ws: Any) -> Dict[str, str]:
-    """رؤوس ترقية WebSocket من عميل websockets (Cookie/User-Agent من pyquotex)."""
-    out: Dict[str, str] = {}
-    try:
-        req = getattr(ws, "request", None)
-        if req is not None:
-            hs = getattr(req, "headers", None)
-            if hs is not None:
-                for k, v in hs.items():
-                    out[str(k)] = str(v)
-                return out
-    except Exception:
-        pass
-    try:
-        rh = getattr(ws, "request_headers", None)
-        if rh is not None:
-            for k, v in rh.items():
-                out[str(k)] = str(v)
-    except Exception:
-        pass
-    return out
-
-
-def _parse_cookie_header_pairs(cookie_header: str) -> List[Tuple[str, str]]:
-    pairs: List[Tuple[str, str]] = []
-    for part in (cookie_header or "").split(";"):
-        part = part.strip()
-        if not part or "=" not in part:
-            continue
-        k, v = part.split("=", 1)
-        k, v = k.strip(), v.strip()
-        if k:
-            pairs.append((k, v))
-    return pairs
-
-
-def _cookie_domain_for_target_wss(target_url: str) -> str:
-    env_d = (os.environ.get("QUOTEX_BRIDGE_COOKIE_DOMAIN") or "").strip()
-    if env_d:
-        return env_d if env_d.startswith(".") else f".{env_d.lstrip('.')}"
-    try:
-        host = (urllib.parse.urlparse(target_url).hostname or "").lower()
-    except Exception:
-        host = ""
-    if not host:
-        return ".qxbroker.com"
-    parts = host.split(".")
-    if len(parts) >= 2:
-        return "." + ".".join(parts[-2:])
-    return "." + host
-
-
-def _load_session_json_entry() -> Dict[str, Any]:
-    path = os.path.join(os.getcwd(), "session.json")
-    if not os.path.isfile(path):
-        return {}
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    for _, entry in data.items():
-        if isinstance(entry, dict) and (
-            (entry.get("cookies") and str(entry.get("cookies")).strip())
-            or (entry.get("user_agent") and str(entry.get("user_agent")).strip())
-        ):
-            return entry
-    return {}
-
-
-def _cookie_header_for_bridge(headers: Dict[str, str]) -> Tuple[str, str]:
-    cookie_header = headers.get("Cookie") or headers.get("cookie") or ""
-    if cookie_header.strip():
-        return cookie_header, "local-handshake"
-    sess = _load_session_json_entry()
-    cookie_header = str(sess.get("cookies") or "").strip()
-    if cookie_header:
-        return cookie_header, "session.json"
-    return "", ""
-
-
-def _user_agent_for_bridge(headers: Dict[str, str], default_ua: str) -> str:
-    ua = headers.get("User-Agent") or headers.get("user-agent") or ""
-    if str(ua).strip():
-        return str(ua).strip()
-    sess = _load_session_json_entry()
-    ua = str(sess.get("user_agent") or "").strip()
-    if ua:
-        print("[Bridge] using user_agent from session.json", flush=True)
-        return ua
-    return default_ua
-
-
-async def _playwright_inject_session_cookies(
-    context: Any, headers: Dict[str, str], target_url: str
-) -> int:
-    """
-    بدون هذا: Chromium يفتح WSS بلا كوكيز جلسة pyquotex → إغلاق سريع (opcode=8) و
-    Connection is already closed عند send_ssid.
-    """
-    cookie_header, cookie_source = _cookie_header_for_bridge(headers)
-    if not cookie_header.strip():
-        print(
-            "[Bridge] WARNING: no Cookie on local WS handshake — "
-            "and no cookies in session.json",
-            flush=True,
-        )
-        return 0
-    domain = _cookie_domain_for_target_wss(target_url)
-    pairs = _parse_cookie_header_pairs(cookie_header)
-    if not pairs:
-        return 0
-    full = []
-    for name, value in pairs:
-        full.append(
-            {
-                "name": name,
-                "value": value,
-                "domain": domain,
-                "path": "/",
-                "secure": True,
-                "sameSite": "Lax",
-            }
-        )
-    try:
-        await context.add_cookies(full)
-    except Exception as e:
-        print(f"[Bridge] add_cookies(full) failed ({e}); retry minimal", flush=True)
-        try:
-            minimal = [
-                {"name": n, "value": v, "domain": domain, "path": "/"} for n, v in pairs
-            ]
-            await context.add_cookies(minimal)
-        except Exception as e2:
-            print(f"[Bridge] add_cookies(minimal) failed: {e2}", flush=True)
-            return 0
-    print(
-        f"[Bridge] injected {len(pairs)} cookie name(s) | source={cookie_source or 'unknown'} | domain={domain}",
-        flush=True,
-    )
-    return len(pairs)
-
-
-async def _wait_bridge_runtime_ready(page: Any, timeout_ms: int = 15000) -> None:
-    try:
-        await page.wait_for_function(
-            """
-            () => Boolean(
-              window.__bridgeReady &&
-              typeof window.__bridgeSend === "function" &&
-              typeof window.__bridgeSendBin === "function" &&
-              typeof window.__connectTarget === "function"
-            )
-            """,
-            timeout=timeout_ms,
-        )
-    except Exception:
-        try:
-            state = await page.evaluate(
-                """
-                () => ({
-                  bridgeReady: Boolean(window.__bridgeReady),
-                  hasBridgeSend: typeof window.__bridgeSend === "function",
-                  hasBridgeSendBin: typeof window.__bridgeSendBin === "function",
-                  hasConnectTarget: typeof window.__connectTarget === "function",
-                  href: location.href,
-                  readyState: document.readyState,
-                })
-                """
-            )
-            print(f"[Bridge] runtime readiness snapshot: {state}", flush=True)
-        except Exception as snap_err:
-            print(f"[Bridge] runtime readiness snapshot failed: {snap_err}", flush=True)
-        raise
-
-
-async def _wait_target_page_ready(page: Any, timeout_ms: int = 25000) -> None:
-    try:
-        await page.wait_for_function(
-            """
-            () => {
-              const href = String(location.href || "");
-              const rs = String(document.readyState || "");
-              const txt = String(document.body?.innerText || "").slice(0, 4000);
-              const html = String(document.documentElement?.innerHTML || "").slice(0, 12000);
-              const challenge =
-                href.startsWith("chrome-error://") ||
-                txt.includes("Just a moment") ||
-                txt.includes("Enable JavaScript and cookies to continue") ||
-                html.includes("__cf_chl_opt");
-              return (rs === "interactive" || rs === "complete") && !challenge;
-            }
-            """,
-            timeout=timeout_ms,
-        )
-    except Exception:
-        try:
-            state = await page.evaluate(
-                """
-                () => ({
-                  href: String(location.href || ""),
-                  readyState: String(document.readyState || ""),
-                  title: String(document.title || ""),
-                  bodyText: String(document.body?.innerText || "").slice(0, 300),
-                  hasCfChallenge: String(document.documentElement?.innerHTML || "").includes("__cf_chl_opt"),
-                })
-                """
-            )
-            print(f"[Bridge] target page readiness snapshot: {state}", flush=True)
-        except Exception as snap_err:
-            print(f"[Bridge] target page readiness snapshot failed: {snap_err}", flush=True)
-        raise
-
-
-def _attach_playwright_ws_debug(ws_obj: Any, match_predicate) -> None:
-    try:
-        url_text = str(ws_obj.url)
-    except Exception:
-        url_text = ""
-    is_target = False
-    try:
-        is_target = bool(match_predicate(url_text))
-    except Exception:
-        is_target = False
-    tag = "TARGET" if is_target else "OTHER"
-    print(f"[Bridge][PW] websocket {tag} created | url={url_text or '-'}", flush=True)
-
-    def _safe_payload(event: Any) -> str:
-        try:
-            payload = getattr(event, "payload", event)
-            text = str(payload)
-        except Exception:
-            text = "<unreadable>"
-        return text[:220]
-
-    try:
-        ws_obj.on(
-            "framereceived",
-            lambda event: print(
-                f"[Bridge][PW] websocket {tag} recv | url={url_text or '-'} | payload={_safe_payload(event)}",
-                flush=True,
-            ),
-        )
-    except Exception:
-        pass
-    try:
-        ws_obj.on(
-            "framesent",
-            lambda event: print(
-                f"[Bridge][PW] websocket {tag} sent | url={url_text or '-'} | payload={_safe_payload(event)}",
-                flush=True,
-            ),
-        )
-    except Exception:
-        pass
-    try:
-        ws_obj.on(
-            "socketerror",
-            lambda err: print(
-                f"[Bridge][PW] websocket {tag} error | url={url_text or '-'} | err={err}",
-                flush=True,
-            ),
-        )
-    except Exception:
-        pass
-    try:
-        ws_obj.on(
-            "close",
-            lambda *_: print(
-                f"[Bridge][PW] websocket {tag} close | url={url_text or '-'}",
-                flush=True,
-            ),
-        )
-    except Exception:
-        pass
-
-
-_BRIDGE_RUNTIME_JS = r"""
-(() => {
-  if (window.__bridgeRuntimeInstalled) {
-    return;
-  }
-  window.__bridgeRuntimeInstalled = true;
-  const NativeWebSocket = window.WebSocket;
-  window.__targetWs = window.__targetWs || null;
-  window.__targetPending = window.__targetPending || [];
-  window.__bridgeTargetUrl = window.__bridgeTargetUrl || "";
-  window.__bridgeManualFallbackTimer = null;
-  window.__bridgePageWaitTimer = null;
-  window.__bridgeSawPageSocket = false;
-  window.__bridgeLastCaptureSource = window.__bridgeLastCaptureSource || "";
-
-  const emit = (payload) => {
-    try {
-      if (typeof window.__bridgeEmit === "function") {
-        window.__bridgeEmit(payload);
-      }
-    } catch (_) {}
-  };
-
-  const flushPending = () => {
-    if (!window.__targetWs || window.__targetWs.readyState !== 1) return;
-    while (window.__targetPending.length > 0) {
-      const item = window.__targetPending.shift();
-      if (item.type === "b") {
-        const raw = atob(item.data);
-        const bytes = new Uint8Array(raw.length);
-        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-        window.__targetWs.send(bytes.buffer);
-      } else {
-        window.__targetWs.send(item.data);
-      }
-    }
-  };
-
-  const bridgeifySocket = (ws, source, urlText) => {
-    if (!ws || ws.__bridgeObserved) return ws;
-    ws.__bridgeObserved = true;
-    window.__targetWs = ws;
-    window.__bridgeLastCaptureSource = source;
-    if (source === "page") {
-      window.__bridgeSawPageSocket = true;
-      if (window.__bridgeManualFallbackTimer) {
-        clearTimeout(window.__bridgeManualFallbackTimer);
-        window.__bridgeManualFallbackTimer = null;
-      }
-    }
-    try {
-      ws.binaryType = "arraybuffer";
-    } catch (_) {}
-    emit({ k: "t", d: `__WS_CAPTURE__|source=${source}|url=${urlText || ""}` });
-    ws.addEventListener("open", () => {
-      emit({ k: "t", d: "__WS_OPEN__" });
-      flushPending();
-    });
-    ws.addEventListener("close", (event) => {
-      const reason = event && typeof event.reason === "string" ? event.reason : "";
-      const code = event && typeof event.code === "number" ? event.code : 0;
-      const clean = Boolean(event && event.wasClean);
-      emit({ k: "t", d: `__WS_CLOSE__|code=${code}|reason=${reason}|clean=${clean}|source=${source}` });
-    });
-    ws.addEventListener("error", () => {
-      const rs = ws ? ws.readyState : -1;
-      emit({ k: "t", d: `__WS_ERROR__|readyState=${rs}|source=${source}` });
-    });
-    ws.addEventListener("message", async (event) => {
-      try {
-        if (typeof event.data === "string") {
-          emit({ k: "t", d: event.data });
-          return;
-        }
-        let ab;
-        if (event.data instanceof ArrayBuffer) {
-          ab = event.data;
-        } else if (event.data instanceof Blob) {
-          ab = await event.data.arrayBuffer();
-        } else {
-          emit({ k: "t", d: String(event.data) });
-          return;
-        }
-        const bytes = new Uint8Array(ab);
-        let binary = "";
-        for (let i = 0; i < bytes.length; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        emit({ k: "b", d: btoa(binary) });
-      } catch (e) {
-        emit({ k: "t", d: "__WS_BRIDGE_ERR__" });
-      }
-    });
-    return ws;
-  };
-
-  const looksLikeBridgeTarget = (urlText) => {
-    const s = String(urlText || "");
-    if (!s || (!s.startsWith("ws://") && !s.startsWith("wss://"))) return false;
-    if (window.__bridgeTargetUrl) {
-      try {
-        const a = new URL(s);
-        const b = new URL(window.__bridgeTargetUrl);
-        if (a.hostname === b.hostname) {
-          if (a.pathname === b.pathname) return true;
-          if (a.pathname.includes("/socket.io/") && b.pathname.includes("/socket.io/")) return true;
-        }
-      } catch (_) {}
-      if (s === window.__bridgeTargetUrl) return true;
-    }
-    return s.includes("qxbroker.com") || s.includes("/socket.io/");
-  };
-
-  class BridgeWebSocket extends NativeWebSocket {
-    constructor(url, protocols) {
-      super(url, protocols);
-      const urlText = String(url || "");
-      if (looksLikeBridgeTarget(urlText)) {
-        bridgeifySocket(this, "page", urlText);
-      } else if (urlText.startsWith("ws://") || urlText.startsWith("wss://")) {
-        emit({ k: "t", d: `__WS_SKIP__|url=${urlText}` });
-      }
-    }
-  }
-  BridgeWebSocket.prototype = NativeWebSocket.prototype;
-  Object.setPrototypeOf(BridgeWebSocket, NativeWebSocket);
-  BridgeWebSocket.CONNECTING = NativeWebSocket.CONNECTING;
-  BridgeWebSocket.OPEN = NativeWebSocket.OPEN;
-  BridgeWebSocket.CLOSING = NativeWebSocket.CLOSING;
-  BridgeWebSocket.CLOSED = NativeWebSocket.CLOSED;
-  window.WebSocket = BridgeWebSocket;
-
-  window.__bridgeSend = (txt) => {
-    if (window.__targetWs && window.__targetWs.readyState === 1) {
-      window.__targetWs.send(txt);
-    } else {
-      window.__targetPending.push({ type: "t", data: txt });
-    }
-  };
-
-  window.__bridgeSendBin = (b64) => {
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    if (window.__targetWs && window.__targetWs.readyState === 1) {
-      window.__targetWs.send(bytes.buffer);
-    } else {
-      window.__targetPending.push({ type: "b", data: b64 });
-    }
-  };
-
-  window.__connectTarget = (targetUrl) => {
-    const ws = new NativeWebSocket(targetUrl);
-    bridgeifySocket(ws, "manual", String(targetUrl || ""));
-    return ws;
-  };
-
-  window.__bridgeStart = (targetUrl, pageSocketWaitMs, fallbackDelayMs) => {
-    window.__bridgeTargetUrl = String(targetUrl || "");
-    window.__bridgeSawPageSocket = false;
-    const pageWait = Math.max(0, Number(pageSocketWaitMs || 0));
-    const delay = Math.max(0, Number(fallbackDelayMs || 0));
-    if (window.__bridgePageWaitTimer) {
-      clearTimeout(window.__bridgePageWaitTimer);
-      window.__bridgePageWaitTimer = null;
-    }
-    if (window.__bridgeManualFallbackTimer) {
-      clearTimeout(window.__bridgeManualFallbackTimer);
-      window.__bridgeManualFallbackTimer = null;
-    }
-    if (pageWait > 0) {
-      window.__bridgePageWaitTimer = setTimeout(() => {
-        if (!window.__bridgeSawPageSocket) {
-          emit({ k: "t", d: `__WS_PAGE_WAIT_TIMEOUT__|wait_ms=${pageWait}` });
-        }
-      }, pageWait);
-    }
-    if (delay > 0) {
-      window.__bridgeManualFallbackTimer = setTimeout(() => {
-        const ws = window.__targetWs;
-        const readyState = ws ? ws.readyState : -1;
-        if ((!ws || readyState === NativeWebSocket.CLOSED) && !window.__bridgeSawPageSocket) {
-          emit({ k: "t", d: `__WS_MANUAL_FALLBACK__|delay_ms=${delay}|page_seen=false` });
-          window.__connectTarget(window.__bridgeTargetUrl);
-        }
-      }, delay);
-    }
-  };
-
-  window.__bridgeReady = true;
-})();
-"""
-
-
 async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
     outbound = asyncio.Queue()
-    upstream_open = asyncio.Event()
-    client_headers = _incoming_ws_request_headers(client_ws)
     resolved_proxy = _resolve_proxy_url(proxy_url)
     proxy_cfg = _playwright_proxy_config(resolved_proxy)
     if proxy_cfg:
-        print(f"[Bridge] Playwright launch proxy: {proxy_cfg.get('server')}", flush=True)
+        print(f"[Bridge] Playwright context proxy: {proxy_cfg.get('server')}", flush=True)
     else:
         print("[Bridge] Playwright context: no proxy (same IP as VPS — may mismatch pyquotex login IP)", flush=True)
 
     async with async_playwright() as p:
-        launch_kw: Dict[str, Any] = {
-            "headless": True,
-            "args": ["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+        )
+        ctx_kw: Dict[str, Any] = {
+            "user_agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            )
         }
         if proxy_cfg:
-            launch_kw["proxy"] = proxy_cfg
-        browser = await p.chromium.launch(**launch_kw)
-        default_ua = (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/122.0.0.0 Safari/537.36"
-        )
-        ua = _user_agent_for_bridge(client_headers, default_ua)
-        ctx_kw: Dict[str, Any] = {"user_agent": ua}
+            ctx_kw["proxy"] = proxy_cfg
         context = await browser.new_context(**ctx_kw)
-        await _playwright_inject_session_cookies(context, client_headers, target_url)
-        await context.add_init_script(_BRIDGE_RUNTIME_JS)
         page = await context.new_page()
-        await page.add_init_script(_BRIDGE_RUNTIME_JS)
-        try:
-            target_host = urllib.parse.urlparse(target_url).hostname or ""
-        except Exception:
-            target_host = ""
-
-        def _ws_matches_target(url_text: str) -> bool:
-            s = str(url_text or "")
-            if not s:
-                return False
-            try:
-                u = urllib.parse.urlparse(s)
-                if target_host and (u.hostname or "") == target_host:
-                    return True
-            except Exception:
-                pass
-            return "qxbroker.com" in s or "/socket.io/" in s
-
-        page.on(
-            "websocket",
-            lambda ws: _attach_playwright_ws_debug(ws, _ws_matches_target),
+        # عبر بروكسي سكني قد يتأخر domcontentloaded دقائق؛ «commit» أسرع. بدون صفحة يصلح Origin أحياناً.
+        nav_url = (os.environ.get("QUOTEX_BRIDGE_NAV_URL") or "https://qxbroker.com").strip()
+        skip_nav = os.environ.get("QUOTEX_BRIDGE_SKIP_PAGE_NAV", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
         )
+        try:
+            nav_timeout = int(os.environ.get("QUOTEX_BRIDGE_NAV_TIMEOUT_MS", "90000") or 90000)
+        except ValueError:
+            nav_timeout = 90000
+        nav_timeout = max(5000, min(nav_timeout, 300000))
+        if skip_nav or not nav_url:
+            await page.goto("about:blank")
+            print("[Bridge] page: about:blank (skip nav أو URL فارغ)", flush=True)
+        else:
+            try:
+                await page.goto(nav_url, wait_until="commit", timeout=nav_timeout)
+                print(f"[Bridge] page: committed {nav_url}", flush=True)
+            except Exception as nav_err:
+                print(
+                    f"[Bridge] page.goto failed ({nav_err}) — fallback about:blank",
+                    flush=True,
+                )
+                await page.goto("about:blank")
+
         async def emit_to_python(payload):
             """payload من JS: {k:'t', d: str} أو {k:'b', d: base64}"""
             try:
@@ -622,109 +145,99 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                 print(traceback.format_exc())
 
         await page.expose_function("__bridgeEmit", emit_to_python)
-        await page.evaluate(_BRIDGE_RUNTIME_JS)
-        # عبر بروكسي سكني قد يتأخر domcontentloaded دقائق؛ «commit» أسرع. بدون صفحة يصلح Origin أحياناً.
-        nav_url = (os.environ.get("QUOTEX_BRIDGE_NAV_URL") or "https://qxbroker.com").strip()
-        skip_nav = os.environ.get("QUOTEX_BRIDGE_SKIP_PAGE_NAV", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
-        try:
-            nav_timeout = int(os.environ.get("QUOTEX_BRIDGE_NAV_TIMEOUT_MS", "90000") or 90000)
-        except ValueError:
-            nav_timeout = 90000
-        nav_timeout = max(5000, min(nav_timeout, 300000))
-        try:
-            page_ready_timeout = int(
-                os.environ.get("QUOTEX_BRIDGE_PAGE_READY_TIMEOUT_MS", "25000") or 25000
-            )
-        except ValueError:
-            page_ready_timeout = 25000
-        page_ready_timeout = max(3000, min(page_ready_timeout, 180000))
-        if skip_nav or not nav_url:
-            await page.goto("about:blank")
-            print("[Bridge] page: about:blank (skip nav أو URL فارغ)", flush=True)
-        else:
-            try:
-                await page.goto(nav_url, wait_until="commit", timeout=nav_timeout)
-                print(f"[Bridge] page: committed {nav_url}", flush=True)
-            except Exception as nav_err:
-                print(
-                    f"[Bridge] page.goto failed ({nav_err}) — fallback about:blank",
-                    flush=True,
-                )
-                try:
-                    await page.goto("about:blank", wait_until="commit", timeout=5000)
-                except Exception as blank_err:
-                    print(f"[Bridge] about:blank fallback failed: {blank_err}", flush=True)
-        try:
-            await _wait_target_page_ready(page, timeout_ms=page_ready_timeout)
-            print(f"[Bridge] target page ready | timeout_ms={page_ready_timeout}", flush=True)
-        except Exception as page_ready_err:
-            print(
-                f"[Bridge] target page not ready before upstream connect ({page_ready_err}) | timeout_ms={page_ready_timeout}",
-                flush=True,
-            )
-        try:
-            page_settle_delay_ms = int(
-                os.environ.get("QUOTEX_BRIDGE_PAGE_SETTLE_DELAY_MS", "3000") or 3000
-            )
-        except ValueError:
-            page_settle_delay_ms = 3000
-        page_settle_delay_ms = max(0, min(page_settle_delay_ms, 30000))
-        if page_settle_delay_ms:
-            await asyncio.sleep(page_settle_delay_ms / 1000.0)
-            print(f"[Bridge] target page settle delay done | delay_ms={page_settle_delay_ms}", flush=True)
-        await _wait_bridge_runtime_ready(page)
-        try:
-            manual_fallback_delay_ms = int(
-                os.environ.get("QUOTEX_BRIDGE_MANUAL_FALLBACK_DELAY_MS", "7000") or 7000
-            )
-        except ValueError:
-            manual_fallback_delay_ms = 7000
-        manual_fallback_delay_ms = max(0, min(manual_fallback_delay_ms, 30000))
-        try:
-            page_socket_wait_ms = int(
-                os.environ.get("QUOTEX_BRIDGE_PAGE_SOCKET_WAIT_MS", "12000") or 12000
-            )
-        except ValueError:
-            page_socket_wait_ms = 12000
-        page_socket_wait_ms = max(0, min(page_socket_wait_ms, 60000))
+
         await page.evaluate(
-            "(args) => window.__bridgeStart(args.targetUrl, args.pageSocketWaitMs, args.fallbackDelayMs)",
-            {
-                "targetUrl": target_url,
-                "pageSocketWaitMs": page_socket_wait_ms,
-                "fallbackDelayMs": manual_fallback_delay_ms,
-            },
+            """
+            () => {
+              window.__targetWs = null;
+              window.__targetPending = [];
+
+              window.__bridgeSend = (txt) => {
+                if (window.__targetWs && window.__targetWs.readyState === 1) {
+                  window.__targetWs.send(txt);
+                } else {
+                  window.__targetPending.push({ type: "t", data: txt });
+                }
+              };
+
+              window.__bridgeSendBin = (b64) => {
+                const bin = atob(b64);
+                const bytes = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                if (window.__targetWs && window.__targetWs.readyState === 1) {
+                  window.__targetWs.send(bytes.buffer);
+                } else {
+                  window.__targetPending.push({ type: "b", data: b64 });
+                }
+              };
+
+              const flushPending = () => {
+                if (!window.__targetWs || window.__targetWs.readyState !== 1) return;
+                while (window.__targetPending.length > 0) {
+                  const item = window.__targetPending.shift();
+                  if (item.type === "b") {
+                    const raw = atob(item.data);
+                    const bytes = new Uint8Array(raw.length);
+                    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+                    window.__targetWs.send(bytes.buffer);
+                  } else {
+                    window.__targetWs.send(item.data);
+                  }
+                }
+              };
+
+              const connectTarget = (targetUrl) => {
+                const ws = new WebSocket(targetUrl);
+                window.__targetWs = ws;
+                ws.binaryType = "arraybuffer";
+                ws.onopen = () => {
+                  window.__bridgeEmit({ k: "t", d: "__WS_OPEN__" });
+                  flushPending();
+                };
+                ws.onclose = () => {
+                  window.__bridgeEmit({ k: "t", d: "__WS_CLOSE__" });
+                  setTimeout(() => connectTarget(targetUrl), 1200);
+                };
+                ws.onerror = () => {
+                  window.__bridgeEmit({ k: "t", d: "__WS_ERROR__" });
+                };
+                ws.onmessage = async (event) => {
+                  try {
+                    if (typeof event.data === "string") {
+                      window.__bridgeEmit({ k: "t", d: event.data });
+                      return;
+                    }
+                    let ab;
+                    if (event.data instanceof ArrayBuffer) {
+                      ab = event.data;
+                    } else if (event.data instanceof Blob) {
+                      ab = await event.data.arrayBuffer();
+                    } else {
+                      window.__bridgeEmit({ k: "t", d: String(event.data) });
+                      return;
+                    }
+                    const bytes = new Uint8Array(ab);
+                    let binary = "";
+                    for (let i = 0; i < bytes.length; i++) {
+                      binary += String.fromCharCode(bytes[i]);
+                    }
+                    window.__bridgeEmit({ k: "b", d: btoa(binary) });
+                  } catch (e) {
+                    window.__bridgeEmit({ k: "t", d: "__WS_BRIDGE_ERR__" });
+                  }
+                };
+              };
+
+              window.__connectTarget = connectTarget;
+            }
+            """
         )
-        try:
-            upstream_open_timeout = float(
-                os.environ.get("QUOTEX_BRIDGE_UPSTREAM_OPEN_TIMEOUT_SEC", "35") or 35
-            )
-        except ValueError:
-            upstream_open_timeout = 35.0
-        upstream_open_timeout = max(5.0, min(upstream_open_timeout, 120.0))
+
+        await page.evaluate("(targetUrl) => window.__connectTarget(targetUrl)", target_url)
 
         async def from_local_client():
             async for msg in client_ws:
                 try:
-                    if not upstream_open.is_set():
-                        try:
-                            await asyncio.wait_for(upstream_open.wait(), timeout=upstream_open_timeout)
-                            print(
-                                f"[Bridge] upstream ready; releasing local queued traffic | wait_sec={upstream_open_timeout:g}",
-                                flush=True,
-                            )
-                        except asyncio.TimeoutError:
-                            print(
-                                f"[Bridge] upstream open timeout before local send | wait_sec={upstream_open_timeout:g}",
-                                flush=True,
-                            )
-                            return
-                    await _wait_bridge_runtime_ready(page, timeout_ms=5000)
                     if isinstance(msg, (bytes, bytearray)):
                         b64 = base64.b64encode(bytes(msg)).decode("ascii")
                         await page.evaluate("(b64) => window.__bridgeSendBin(b64)", b64)
@@ -741,27 +254,14 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                     continue
                 kind, data = item
                 if kind == "str":
-                    if data.startswith("__WS_CAPTURE__"):
-                        print(f"[Bridge] upstream Quotex WebSocket CAPTURE {data}", flush=True)
-                        continue
-                    if data.startswith("__WS_SKIP__"):
-                        print(f"[Bridge] upstream Quotex WebSocket SKIP {data}", flush=True)
-                        continue
-                    if data.startswith("__WS_PAGE_WAIT_TIMEOUT__"):
-                        print(f"[Bridge] upstream Quotex WebSocket PAGE_WAIT {data}", flush=True)
-                        continue
-                    if data.startswith("__WS_MANUAL_FALLBACK__"):
-                        print(f"[Bridge] upstream Quotex WebSocket FALLBACK {data}", flush=True)
-                        continue
                     if data == "__WS_OPEN__":
                         print("[Bridge] upstream Quotex WebSocket OPEN", flush=True)
-                        upstream_open.set()
                         continue
-                    if data.startswith("__WS_CLOSE__"):
-                        print(f"[Bridge] upstream Quotex WebSocket CLOSE {data}", flush=True)
+                    if data == "__WS_CLOSE__":
+                        print("[Bridge] upstream Quotex WebSocket CLOSE", flush=True)
                         continue
-                    if data.startswith("__WS_ERROR__"):
-                        print(f"[Bridge] upstream Quotex WebSocket ERROR {data}", flush=True)
+                    if data == "__WS_ERROR__":
+                        print("[Bridge] upstream Quotex WebSocket ERROR", flush=True)
                         continue
                     if data == "__WS_BRIDGE_ERR__":
                         continue
