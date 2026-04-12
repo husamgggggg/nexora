@@ -302,8 +302,108 @@ _BRIDGE_RUNTIME_JS = r"""
     return;
   }
   window.__bridgeRuntimeInstalled = true;
+  const NativeWebSocket = window.WebSocket;
   window.__targetWs = window.__targetWs || null;
   window.__targetPending = window.__targetPending || [];
+  window.__bridgeTargetUrl = window.__bridgeTargetUrl || "";
+  window.__bridgeManualFallbackTimer = null;
+
+  const emit = (payload) => {
+    try {
+      if (typeof window.__bridgeEmit === "function") {
+        window.__bridgeEmit(payload);
+      }
+    } catch (_) {}
+  };
+
+  const flushPending = () => {
+    if (!window.__targetWs || window.__targetWs.readyState !== 1) return;
+    while (window.__targetPending.length > 0) {
+      const item = window.__targetPending.shift();
+      if (item.type === "b") {
+        const raw = atob(item.data);
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        window.__targetWs.send(bytes.buffer);
+      } else {
+        window.__targetWs.send(item.data);
+      }
+    }
+  };
+
+  const bridgeifySocket = (ws, source, urlText) => {
+    if (!ws || ws.__bridgeObserved) return ws;
+    ws.__bridgeObserved = true;
+    window.__targetWs = ws;
+    try {
+      ws.binaryType = "arraybuffer";
+    } catch (_) {}
+    emit({ k: "t", d: `__WS_CAPTURE__|source=${source}|url=${urlText || ""}` });
+    ws.addEventListener("open", () => {
+      emit({ k: "t", d: "__WS_OPEN__" });
+      flushPending();
+    });
+    ws.addEventListener("close", (event) => {
+      const reason = event && typeof event.reason === "string" ? event.reason : "";
+      const code = event && typeof event.code === "number" ? event.code : 0;
+      const clean = Boolean(event && event.wasClean);
+      emit({ k: "t", d: `__WS_CLOSE__|code=${code}|reason=${reason}|clean=${clean}|source=${source}` });
+    });
+    ws.addEventListener("error", () => {
+      const rs = ws ? ws.readyState : -1;
+      emit({ k: "t", d: `__WS_ERROR__|readyState=${rs}|source=${source}` });
+    });
+    ws.addEventListener("message", async (event) => {
+      try {
+        if (typeof event.data === "string") {
+          emit({ k: "t", d: event.data });
+          return;
+        }
+        let ab;
+        if (event.data instanceof ArrayBuffer) {
+          ab = event.data;
+        } else if (event.data instanceof Blob) {
+          ab = await event.data.arrayBuffer();
+        } else {
+          emit({ k: "t", d: String(event.data) });
+          return;
+        }
+        const bytes = new Uint8Array(ab);
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        emit({ k: "b", d: btoa(binary) });
+      } catch (e) {
+        emit({ k: "t", d: "__WS_BRIDGE_ERR__" });
+      }
+    });
+    return ws;
+  };
+
+  const looksLikeBridgeTarget = (urlText) => {
+    const s = String(urlText || "");
+    if (!s || (!s.startsWith("ws://") && !s.startsWith("wss://"))) return false;
+    if (window.__bridgeTargetUrl && s === window.__bridgeTargetUrl) return true;
+    return s.includes("qxbroker.com") || s.includes("/socket.io/");
+  };
+
+  class BridgeWebSocket extends NativeWebSocket {
+    constructor(url, protocols) {
+      super(url, protocols);
+      const urlText = String(url || "");
+      if (looksLikeBridgeTarget(urlText)) {
+        bridgeifySocket(this, "page", urlText);
+      }
+    }
+  }
+  BridgeWebSocket.prototype = NativeWebSocket.prototype;
+  Object.setPrototypeOf(BridgeWebSocket, NativeWebSocket);
+  BridgeWebSocket.CONNECTING = NativeWebSocket.CONNECTING;
+  BridgeWebSocket.OPEN = NativeWebSocket.OPEN;
+  BridgeWebSocket.CLOSING = NativeWebSocket.CLOSING;
+  BridgeWebSocket.CLOSED = NativeWebSocket.CLOSED;
+  window.WebSocket = BridgeWebSocket;
 
   window.__bridgeSend = (txt) => {
     if (window.__targetWs && window.__targetWs.readyState === 1) {
@@ -324,65 +424,29 @@ _BRIDGE_RUNTIME_JS = r"""
     }
   };
 
-  const flushPending = () => {
-    if (!window.__targetWs || window.__targetWs.readyState !== 1) return;
-    while (window.__targetPending.length > 0) {
-      const item = window.__targetPending.shift();
-      if (item.type === "b") {
-        const raw = atob(item.data);
-        const bytes = new Uint8Array(raw.length);
-        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-        window.__targetWs.send(bytes.buffer);
-      } else {
-        window.__targetWs.send(item.data);
-      }
-    }
+  window.__connectTarget = (targetUrl) => {
+    const ws = new NativeWebSocket(targetUrl);
+    bridgeifySocket(ws, "manual", String(targetUrl || ""));
+    return ws;
   };
 
-  window.__connectTarget = (targetUrl) => {
-    const ws = new WebSocket(targetUrl);
-    window.__targetWs = ws;
-    ws.binaryType = "arraybuffer";
-    ws.onopen = () => {
-      window.__bridgeEmit({ k: "t", d: "__WS_OPEN__" });
-      flushPending();
-    };
-    ws.onclose = (event) => {
-      const reason = event && typeof event.reason === "string" ? event.reason : "";
-      const code = event && typeof event.code === "number" ? event.code : 0;
-      const clean = Boolean(event && event.wasClean);
-      window.__bridgeEmit({ k: "t", d: `__WS_CLOSE__|code=${code}|reason=${reason}|clean=${clean}` });
-      setTimeout(() => window.__connectTarget(targetUrl), 1200);
-    };
-    ws.onerror = () => {
-      const rs = ws ? ws.readyState : -1;
-      window.__bridgeEmit({ k: "t", d: `__WS_ERROR__|readyState=${rs}` });
-    };
-    ws.onmessage = async (event) => {
-      try {
-        if (typeof event.data === "string") {
-          window.__bridgeEmit({ k: "t", d: event.data });
-          return;
+  window.__bridgeStart = (targetUrl, fallbackDelayMs) => {
+    window.__bridgeTargetUrl = String(targetUrl || "");
+    const delay = Math.max(0, Number(fallbackDelayMs || 0));
+    if (window.__bridgeManualFallbackTimer) {
+      clearTimeout(window.__bridgeManualFallbackTimer);
+      window.__bridgeManualFallbackTimer = null;
+    }
+    if (delay > 0) {
+      window.__bridgeManualFallbackTimer = setTimeout(() => {
+        const ws = window.__targetWs;
+        const readyState = ws ? ws.readyState : -1;
+        if (!ws || readyState === NativeWebSocket.CLOSED) {
+          emit({ k: "t", d: `__WS_MANUAL_FALLBACK__|delay_ms=${delay}` });
+          window.__connectTarget(window.__bridgeTargetUrl);
         }
-        let ab;
-        if (event.data instanceof ArrayBuffer) {
-          ab = event.data;
-        } else if (event.data instanceof Blob) {
-          ab = await event.data.arrayBuffer();
-        } else {
-          window.__bridgeEmit({ k: "t", d: String(event.data) });
-          return;
-        }
-        const bytes = new Uint8Array(ab);
-        let binary = "";
-        for (let i = 0; i < bytes.length; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        window.__bridgeEmit({ k: "b", d: btoa(binary) });
-      } catch (e) {
-        window.__bridgeEmit({ k: "t", d: "__WS_BRIDGE_ERR__" });
-      }
-    };
+      }, delay);
+    }
   };
 
   window.__bridgeReady = true;
@@ -494,7 +558,17 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
             await asyncio.sleep(page_settle_delay_ms / 1000.0)
             print(f"[Bridge] target page settle delay done | delay_ms={page_settle_delay_ms}", flush=True)
         await _wait_bridge_runtime_ready(page)
-        await page.evaluate("(targetUrl) => window.__connectTarget(targetUrl)", target_url)
+        try:
+            manual_fallback_delay_ms = int(
+                os.environ.get("QUOTEX_BRIDGE_MANUAL_FALLBACK_DELAY_MS", "7000") or 7000
+            )
+        except ValueError:
+            manual_fallback_delay_ms = 7000
+        manual_fallback_delay_ms = max(0, min(manual_fallback_delay_ms, 30000))
+        await page.evaluate(
+            "(args) => window.__bridgeStart(args.targetUrl, args.fallbackDelayMs)",
+            {"targetUrl": target_url, "fallbackDelayMs": manual_fallback_delay_ms},
+        )
         try:
             upstream_open_timeout = float(
                 os.environ.get("QUOTEX_BRIDGE_UPSTREAM_OPEN_TIMEOUT_SEC", "35") or 35
@@ -536,6 +610,12 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                     continue
                 kind, data = item
                 if kind == "str":
+                    if data.startswith("__WS_CAPTURE__"):
+                        print(f"[Bridge] upstream Quotex WebSocket CAPTURE {data}", flush=True)
+                        continue
+                    if data.startswith("__WS_MANUAL_FALLBACK__"):
+                        print(f"[Bridge] upstream Quotex WebSocket FALLBACK {data}", flush=True)
+                        continue
                     if data == "__WS_OPEN__":
                         print("[Bridge] upstream Quotex WebSocket OPEN", flush=True)
                         upstream_open.set()
