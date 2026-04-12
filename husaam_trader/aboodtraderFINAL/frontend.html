@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>NEXORA TRADE | منصة التداول</title>
+<title>NEXO TRADE | منصة التداول</title>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#050810">
@@ -273,15 +273,14 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .oi .sub{font-size:10px;color:var(--mu3);margin-top:3px;font-weight:400;}
 .oi-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
 .oi-main{display:flex;align-items:center;gap:8px;min-width:0;}
-.oi-flag{width:16px;height:12px;border-radius:2px;object-fit:cover;border:1px solid rgba(255,255,255,.14);display:block;}
-.oi-gen,.vaf-gen{display:inline-flex;align-items:center;justify-content:center;min-width:14px;height:12px;padding:0 2px;border-radius:2px;background:linear-gradient(145deg,#3d4f6b,#283548);color:#d0dce8;font-size:7px;font-weight:900;line-height:1;border:1px solid rgba(255,255,255,.12);box-sizing:border-box;}
-.vaf-gen{min-width:12px;height:10px;font-size:6px;}
+.oi-flag{width:18px;height:18px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,.2);display:block;box-shadow:0 0 0 1px rgba(0,0,0,.2) inset;}
+.oi-gen,.vaf-gen{display:inline-flex;align-items:center;justify-content:center;min-width:18px;width:18px;height:18px;padding:0;border-radius:50%;background:linear-gradient(145deg,#3d4f6b,#283548);color:#d0dce8;font-size:6px;font-weight:900;line-height:1;border:1px solid rgba(255,255,255,.16);box-sizing:border-box;}
+.vaf-gen{min-width:15px;width:15px;height:15px;font-size:5px;}
 .oi-gen.oi-metal,.vaf-gen.oi-metal{background:linear-gradient(145deg,#c9a227,#7a5c1a);color:#fff;border-color:rgba(255,220,120,.25);}
-.oi-ic,.vaf-flags{display:inline-flex;align-items:center;gap:3px;flex-shrink:0;}
+.oi-ic{display:inline-flex;align-items:center;gap:2px;flex-shrink:0;}
 .vAsset-bar{min-width:0;flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:4px 5px;font-size:11px;font-weight:800;line-height:1.25;color:var(--tx);}
-.vaf-chip{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%;}
-.vaf-flags{display:inline-flex;align-items:center;gap:2px;flex-shrink:0;}
-.vaf-f{width:14px;height:10px;border-radius:2px;}
+.vaf-chip{display:inline-flex;align-items:center;gap:3px;min-width:0;max-width:100%;}
+.vaf-f{width:15px;height:15px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,.2);box-shadow:0 0 0 1px rgba(0,0,0,.2) inset;}
 .vaf-sep{color:var(--mu3);font-weight:800;padding:0 1px;flex-shrink:0;}
 .vaf-txt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:7.5rem;}
 .oi-name{font-size:13px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -513,12 +512,12 @@ h1{font-size:18px;}
 <!-- ══ ACCOUNT ══ -->
 <div id="sAcc" class="scr">
   <div class="hdr">
-    <div class="logo-wrap"><div class="logo-top">نيكسورا تريد</div><div class="logo-main">NEXORA <span>TRADE</span></div></div>
+    <div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main">NEXO <span>TRADE</span></div></div>
     <div class="hdr-r"><div class="hdr-id" id="hId">#00000000</div><div class="hdr-em" id="hEm">email</div></div>
   </div>
   <div id="simA"></div>
   <div class="acc-hero">
-    <div class="acc-badge">نيكسورا تريد</div>
+    <div class="acc-badge">نيكسو تريد</div>
     <div class="acc-name" id="dEm">مرحباً</div>
     <div class="acc-conn"><span class="dot"></span>متصل بـ Quotex</div>
   </div>
@@ -544,7 +543,7 @@ h1{font-size:18px;}
 <!-- ══ BOT ══ -->
 <div id="sBot" class="scr">
   <div class="hdr">
-    <div class="logo-wrap"><div class="logo-top">نيكسورا تريد</div><div class="logo-main">NEXORA <span>TRADE</span></div></div>
+    <div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main">NEXO <span>TRADE</span></div></div>
     <div id="simB"></div>
   </div>
   <div class="sl">اختيار الحساب</div>
@@ -555,7 +554,7 @@ h1{font-size:18px;}
   <div class="sl">الإعدادات</div>
   <div class="sc">
     <div class="sr" onclick="om('assets')"><div class="sv"><span id="vAsset" class="vAsset-bar">EUR/USD (OTC)</span><span class="ch">‹</span></div><div class="slb">الأزواج المختارة</div></div>
-    <div class="sr" onclick="om('strategy')"><div class="sv"><span id="vStrat">NEXORA</span><span class="ch">‹</span></div><div class="slb">الاستراتيجية</div></div>
+    <div class="sr" onclick="om('strategy')"><div class="sv"><span id="vStrat">PREMIUM</span><span class="ch">‹</span></div><div class="slb">الاستراتيجية</div></div>
   </div>
   <div class="sl">المبلغ والحدود</div>
   <div class="irow">
@@ -586,7 +585,7 @@ h1{font-size:18px;}
 
 <!-- ══ STATS ══ -->
 <div id="sSt" class="scr">
-  <div class="hdr"><div class="logo-wrap"><div class="logo-top">نيكسورا تريد</div><div class="logo-main" id="stTitle">الإحصائيات</div></div></div>
+  <div class="hdr"><div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main" id="stTitle">الإحصائيات</div></div></div>
   <div class="langRow">
     <button class="langBtn sel" id="langAr" type="button" onclick="setLang('ar')">العربية</button>
     <button class="langBtn" id="langEn" type="button" onclick="setLang('en')">English</button>
@@ -649,13 +648,12 @@ h1{font-size:18px;}
 
 <!-- ══ SUPPORT ══ -->
 <div id="sSup" class="scr">
-  <div class="hdr"><div class="logo-wrap"><div class="logo-top">نيكسورا تريد</div><div class="logo-main">الدعم</div></div></div>
+  <div class="hdr"><div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main">الدعم</div></div></div>
   <div style="padding:18px 16px 12px"><div style="font-size:18px;font-weight:900;margin-bottom:4px">مركز المساعدة</div><div style="font-size:12px;color:var(--mu3)">الأسئلة الشائعة وإرشادات الاستخدام</div></div>
   <div style="margin:0 14px;display:flex;flex-direction:column;gap:8px">
     <div class="sup-item" onclick="openHelp('start')"><span class="sup-icon">🚀</span><span>كيف أبدأ التداول؟</span></div>
     <div class="sup-item" onclick="openHelp('real_demo')"><span class="sup-icon">💰</span><span>ما الفرق بين الحساب الحقيقي والتجريبي؟</span></div>
     <div class="sup-item" onclick="openHelp('profit_loss')"><span class="sup-icon">🎯</span><span>كيف أضبط هدف الربح وحد الخسارة؟</span></div>
-    <div class="sup-item" onclick="openHelp('best_strategy')"><span class="sup-icon">📊</span><span>ما الاستراتيجية الأفضل؟</span></div>
     <div class="sup-item" onclick="openHelp('multi_assets')"><span class="sup-icon">🔗</span><span>كيف أختار أكثر من زوج؟</span></div>
   </div>
   <div class="nav">
@@ -671,7 +669,7 @@ h1{font-size:18px;}
   <div class="lvc">
     <button class="lvc-close" onclick="closeLiveByUser()" title="إغلاق">×</button>
     <div class="lp" id="lPair">EURUSD</div>
-    <div class="lsub" id="lStrat">NEXORA STRATEGY</div>
+    <div class="lsub" id="lStrat">PREMIUM</div>
     <div class="ld up" id="lDir">▲ شراء</div>
     <div class="lm">
       <div class="lmi"><div class="lml">المبلغ</div><div class="lmv" id="lAmt">10</div></div>
@@ -699,7 +697,7 @@ const DEFAULT_ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','E
 const DEFAULT_ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
 const DEFAULT_ASSETS=[...DEFAULT_ASSETS_OTC,...DEFAULT_ASSETS_LIVE];
 const ASSETS_REFRESH_INTERVAL_MS=10*60*1000;
-const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetsAwaitingQuotex:false,assetsQuotexSynced:false,assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0};
+const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM_EMA10',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetsAwaitingQuotex:false,assetsQuotexSynced:false,assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0};
 const MAX_ASSETS=3;
 const FIAT_FLAG={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz',CHF:'ch',MXN:'mx',TRY:'tr',ZAR:'za',CNY:'cn',CNH:'cn',HKD:'hk',SGD:'sg',NOK:'no',SEK:'se',DKK:'dk',PLN:'pl',RUB:'ru',INR:'in',BRL:'br',KRW:'kr',THB:'th',IDR:'id',PHP:'ph',MYR:'my',HUF:'hu',CZK:'cz',ILS:'il',AED:'ae',SAR:'sa',USDT:'us',USDC:'us',BUSD:'us',TUSD:'us',DAI:'us'};
 const QUOTE_SUFFIXES=['USDT','USDC','BUSD','TUSD','DAI','EUR','GBP','USD','JPY','AUD','CAD','CHF','NZD','MXN','TRY','ZAR','SEK','NOK','DKK','PLN','CNY','CNH','HKD','SGD','INR','RUB','BRL','KRW','THB','IDR','PHP','MYR','HUF','CZK','ILS','AED','SAR'];
@@ -802,11 +800,12 @@ function tickSimPayouts(){
   });
 }
 setInterval(tickSimPayouts, 9000);
-const STRATEGIES=[
-  {key:'HUSAAM',label:'NEXORA',sub:'منهجية متعددة المؤشرات لفرص التداول عالية الجودة'},
-  {key:'HUSAAM_EMA10',label:'NEXORA EMA10',sub:'ارتدادات EMA10 على شموع الدقيقة مع تأكيد مغلق'}
-];
-const STRAT_LABELS={HUSAAM:'NEXORA',HUSAAM_EMA10:'EMA10'};
+const STRATEGIES=[{key:'HUSAAM_EMA10',label:'PREMIUM'}];
+const STRAT_LABELS={HUSAAM_EMA10:'PREMIUM',HUSAAM:'PREMIUM'};
+(function ensureStrategyKey(){
+  if(!STRATEGIES.some(st=>st.key===s.strategy))s.strategy=STRATEGIES[0].key;
+  const vs=document.getElementById('vStrat');if(vs)vs.textContent=STRAT_LABELS[s.strategy]||STRATEGIES[0].label;
+})();
 function escHtml(t){
   return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -956,7 +955,7 @@ function afterLogin(d){
   document.getElementById('pinBox').style.display='none';document.getElementById('loginBox').style.display='block';
   if(!s.sim){setRealQuotexAssetsPending();scheduleQuotexAssetRefreshRetries();}
   else{s.assetsAwaitingQuotex=false;}
-  updBals();toast('✅ مرحباً بك في نيكسورا تريد','ok');go('sBot',2);scheduleAssetsRefreshAfterLogin();if(!s.sim)startPoll();
+  updBals();toast('✅ مرحباً بك في نيكسو تريد','ok');go('sBot',2);scheduleAssetsRefreshAfterLogin();if(!s.sim)startPoll();
 }
 async function doLogout(){
   if(assetsInitTimer){clearTimeout(assetsInitTimer);assetsInitTimer=null;}
@@ -1010,7 +1009,7 @@ function showLive(asset,dir,secs,tradeId=''){
   const ov=document.getElementById('ov');
   ov.dataset.tradeId=tradeId||'';
   document.getElementById('lPair').textContent=pairLabel(asset);
-  document.getElementById('lStrat').textContent=(STRAT_LABELS[s.strategy]||s.strategy).toUpperCase()+' STRATEGY';
+  document.getElementById('lStrat').textContent=STRAT_LABELS[s.strategy]||'PREMIUM';
   document.getElementById('lDir').textContent=isUp?'▲ شراء':'▼ بيع';
   document.getElementById('lDir').className='ld '+(isUp?'up':'dn');
   document.getElementById('lAmt').textContent=(document.getElementById('iAmt').value||10)+' '+s.currency;
@@ -1167,17 +1166,6 @@ const HELP={
       </div>
     `
   },
-  best_strategy:{
-    title:'ما الاستراتيجية الأفضل؟',
-    body:`
-      <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
-        الأفضل يعتمد على السوق، لكن عادةً:
-        <br>- إن كنت تريد فرصاً أكثر: جرّب استراتيجيات EMA10 أو HUSAAM بعد تعديل الحدود.
-        <br>- إن كنت تريد تأكيد أعلى: جرّب HUSAAM_PRIVATE أو الوضع الصارم (HUSAAM).
-        <br><br>ابدأ بـ Demo ثم قيّم Win Rate وربح/خسارة الجلسة.
-      </div>
-    `
-  },
   multi_assets:{
     title:'كيف أختار أكثر من زوج؟',
     body:`
@@ -1278,7 +1266,7 @@ function om(key){
     list.appendChild(conf);
   }else if(key==='strategy'){
     document.getElementById('mTit').textContent='اختر الاستراتيجية';const list=document.getElementById('mList');list.innerHTML='';
-    STRATEGIES.forEach(st=>{const el=document.createElement('div');el.className='oi'+(st.key===s.strategy?' sel':'');el.innerHTML=`${st.label}<div class="sub">${st.sub}</div>`;el.onclick=()=>{s.strategy=st.key;document.getElementById('vStrat').textContent=STRAT_LABELS[st.key]||st.label;cm(null,true);};list.appendChild(el);});
+    STRATEGIES.forEach(st=>{const el=document.createElement('div');el.className='oi'+(st.key===s.strategy?' sel':'');el.textContent=st.label;el.onclick=()=>{s.strategy=st.key;document.getElementById('vStrat').textContent=STRAT_LABELS[st.key]||st.label;cm(null,true);};list.appendChild(el);});
   }
   document.getElementById('mbg').classList.add('on');
 }
