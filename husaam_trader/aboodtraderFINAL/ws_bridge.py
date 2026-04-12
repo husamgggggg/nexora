@@ -27,7 +27,26 @@ except Exception:  # pragma: no cover
 
 from playwright.async_api import async_playwright
 
+try:
+    from playwright_stealth import Stealth
+except ImportError:  # pragma: no cover
+    Stealth = None  # type: ignore[misc, assignment]
+
 _SESSION_END = object()
+
+
+def _playwright_entry():
+    """Stealth يقلّل بصمة الأتمتة في الصفحة (ليس ضماناً لاجتياز Cloudflare)."""
+    if Stealth is None:
+        return async_playwright()
+    if os.getenv("QUOTEX_BRIDGE_DISABLE_STEALTH", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return async_playwright()
+    return Stealth().use_async(async_playwright())
 
 
 def _ws_still_open(conn) -> bool:
@@ -135,7 +154,27 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
             flush=True,
         )
 
-    async with async_playwright() as p:
+    _stealth_disabled_env = os.getenv("QUOTEX_BRIDGE_DISABLE_STEALTH", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    _stealth_on = Stealth is not None and not _stealth_disabled_env
+    if _stealth_on:
+        print(f"[Bridge] session={session_id} playwright-stealth: on", flush=True)
+    elif Stealth is None:
+        print(
+            f"[Bridge] session={session_id} playwright-stealth: off (install playwright-stealth)",
+            flush=True,
+        )
+    else:
+        print(
+            f"[Bridge] session={session_id} playwright-stealth: off (QUOTEX_BRIDGE_DISABLE_STEALTH)",
+            flush=True,
+        )
+
+    async with _playwright_entry() as p:
         browser = await p.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],

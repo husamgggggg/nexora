@@ -11,3 +11,4 @@ websocket-client
 curl-cffi
 websockets
 playwright
+playwright-stealth
