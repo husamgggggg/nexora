@@ -1007,6 +1007,8 @@ def run_async(coro, timeout=30):
 # ── loop مستقل لكل مشترك — يمنع تعليق الكل بسبب مشترك واحد ──────────────────
 _session_loops: dict = {}
 _session_loop_lock = threading.Lock()
+# تسلسل جلب شموع 1m عبر كل الحسابات (عدة event loops) — يقلل تداخلًا داخل pyquotex أدى لـ raw_rows=0.
+_QUOTEX_MINUTE_FETCH_LOCK = threading.Lock()
 
 def get_session_loop(email: str):
     with _session_loop_lock:
@@ -2071,7 +2073,8 @@ async def _quotex_prepare_candles_session(client, asset: str, period: int) -> No
     try:
         client.api.current_asset = asset
         client.start_candles_stream(asset, period)
-        await asyncio.sleep(1.0)
+        _prep = float(os.getenv("QUOTEX_CANDLE_PREP_WAIT_SEC", "1.8") or 1.8)
+        await asyncio.sleep(max(0.5, _prep))
     except Exception as e:
         log.debug("quotex_prepare_candles_session: %s", e)
 
@@ -2100,6 +2103,20 @@ def _extract_v2_chart_ohlc_candles(client, asset: str) -> list:
         if row:
             out.append(row)
     return _sort_candles_by_time(out)
+
+
+async def _wait_candle_v2_from_stream(
+    client, asset: str, min_rows: int = 3, max_wait_sec: float = 4.0
+) -> None:
+    """
+    بعد مسح candle_v2_data غالباً يصل رد history/list عبر WebSocket قبل اكتمال get_candle_v2.
+    ينتظر حتى تظهر شموع OHLC في candle_v2_data أو تنتهي المهلة.
+    """
+    deadline = time.time() + max(0.2, max_wait_sec)
+    while time.time() < deadline:
+        if len(_extract_v2_chart_ohlc_candles(client, asset)) >= min_rows:
+            return
+        await asyncio.sleep(0.2)
 
 
 async def _fetch_quotex_minute_once(client, asset: str) -> list:
@@ -2132,16 +2149,30 @@ async def _fetch_quotex_minute_once(client, asset: str) -> list:
             client.api.candle_v2_data[asset] = None
         except Exception:
             pass
+        _ws_wait = float(os.getenv("QUOTEX_CANDLE_V2_WS_WAIT_SEC", "4.0") or 4.0)
+        await _wait_candle_v2_from_stream(
+            client, asset, min_rows=3, max_wait_sec=max(0.5, _ws_wait)
+        )
         log.info(
             "📊 EMA10: طلب get_candle_v2 بعد stream | asset=%s current=%s period=%s",
             asset,
             cur,
             period,
         )
-        raw_v2 = await asyncio.wait_for(client.get_candle_v2(asset, period), timeout=5.0)
+        _v2_to = float(os.getenv("QUOTEX_GET_CANDLE_V2_TIMEOUT", "8") or 8)
+        raw_v2 = await asyncio.wait_for(
+            client.get_candle_v2(asset, period), timeout=max(5.0, _v2_to)
+        )
     except Exception as e:
         log.debug("get_candle_v2(%s): %s", asset, e)
         raw_v2 = []
+    if not raw_v2:
+        log.warning(
+            "📊 EMA10: get_candle_v2 فارغ بعد الانتظار | asset=%s current=%s period=%s",
+            asset,
+            getattr(getattr(client, "api", None), "current_asset", None),
+            period,
+        )
     if raw_v2:
         out_v2 = []
         for c in raw_v2:
@@ -2324,7 +2355,20 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
             return _finalize(ce["candles"], "quotex_1m_cache")
 
     try:
-        lst = run_async_for(email, _fetch_quotex_minute_candles_async(client, asset), _HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC)
+        _ser = os.getenv("NEXORA_SERIALIZE_QUOTEX_CANDLE_FETCH", "1").strip().lower()
+        if _ser in ("0", "false", "no", "off"):
+            lst = run_async_for(
+                email,
+                _fetch_quotex_minute_candles_async(client, asset),
+                _HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC,
+            )
+        else:
+            with _QUOTEX_MINUTE_FETCH_LOCK:
+                lst = run_async_for(
+                    email,
+                    _fetch_quotex_minute_candles_async(client, asset),
+                    _HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC,
+                )
     except Exception as e:
         log.warning("جلب شموع Quotex: %s", e)
         lst = []
