@@ -9,7 +9,7 @@ NEXORA TRADE Bot — النسخة النهائية الكاملة
 ✅ إشعار عند تحقق الهدف
 """
 import asyncio, base64, html, json, logging, os, queue, random, re, socket, ssl, subprocess, sys
-import secrets, threading, time, traceback
+import secrets, threading, time, traceback, weakref
 from contextlib import asynccontextmanager
 import urllib.parse
 import urllib.request
@@ -1867,6 +1867,177 @@ _WARMUP_COLLECT_SEC = 180
 _WARMUP_COLLECT_SEC_EMA10 = 25
 
 
+def _central_market_enabled() -> bool:
+    """طبقة سوق مركزية: زوج واحد = مغذّي واحد؛ الحسابات تقرأ فقط (بدون التحكم بستريم غيرهم)."""
+    if not QX:
+        return False
+    return os.getenv("NEXORA_CENTRAL_MARKET", "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+_central_rlock = threading.RLock()
+# زوج → تيكات مركزية (مراقبة / واجهة)
+_central_ticks: dict = {}
+# زوج → {t, candles, source}
+_central_candles: dict = {}
+# زوج → {stop, thread, email, client_ref}
+_central_feeders: dict = {}
+
+
+def _central_append_tick(asset: str, p: float) -> None:
+    if p <= 0 or not asset:
+        return
+    with _central_rlock:
+        lst = _central_ticks.setdefault(asset, [])
+        lst.append({"price": p, "time": time.time()})
+        cutoff = time.time() - _PRICE_BUFFER_RETENTION_SEC
+        _central_ticks[asset] = [x for x in lst if x["time"] > cutoff]
+
+
+def _central_ticks_len(asset: str) -> int:
+    with _central_rlock:
+        return len(_central_ticks.get(asset, ()))
+
+
+def _central_get_candle_snapshot(asset: str):
+    with _central_rlock:
+        return _central_candles.get(asset)
+
+
+def _central_set_candles(asset: str, rows: list) -> None:
+    with _central_rlock:
+        _central_candles[asset] = {
+            "t": time.time(),
+            "candles": list(rows) if rows else [],
+            "source": "quotex",
+        }
+
+
+def _central_detach_client(client) -> None:
+    """عند إغلاق عميل: أوقف أي مغذّي يعتمد عليه."""
+    if client is None:
+        return
+    with _central_rlock:
+        for _asset, fd in list(_central_feeders.items()):
+            try:
+                cr = fd.get("client_ref")
+                if cr and cr() is client:
+                    fd["stop"].set()
+            except Exception:
+                pass
+
+
+async def _collect_one_tick_to_central_async(client, asset: str) -> float:
+    """تيك واحد إلى المخزن المركزي (على loop المزوّد)."""
+    keys = _quotex_tick_keys(client, asset)
+    try:
+        for _ in range(12):
+            for key in keys:
+                try:
+                    price = await client.get_realtime_price(key)
+                except Exception:
+                    continue
+                p = _parse_rt_price(price)
+                if p > 0:
+                    _central_append_tick(asset, p)
+                    return p
+            p2 = _price_from_realtime_candles_tuple(client)
+            if p2 > 0:
+                _central_append_tick(asset, p2)
+                return p2
+            await asyncio.sleep(0.12)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _central_feeder_thread_main(asset: str, email: str, client_ref, stop_ev: threading.Event):
+    """خيط واحد لكل زوج: stream + تيكات + تجديد شموع 1m دوري."""
+    _cint = float(os.getenv("NEXORA_CENTRAL_CANDLE_REFRESH_SEC", "50") or 50)
+    _cint = max(25.0, min(_cint, 300.0))
+    _fto = float(
+        os.getenv(
+            "HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC",
+            str(_HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC),
+        )
+        or _HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC
+    )
+    _fto = max(30.0, min(_fto, 180.0))
+    stream_started = False
+    last_candle_t = 0.0
+    while not stop_ev.is_set():
+        c = client_ref()
+        if c is None:
+            log.info("📡 سوق مركزي: إيقاف مغذّي %s (لا عميل)", asset)
+            break
+        try:
+            if not stream_started:
+                run_async_for(email, _start_price_stream(c, asset), 25)
+                stream_started = True
+        except Exception:
+            stream_started = False
+        try:
+            run_async_for(email, _collect_one_tick_to_central_async(c, asset), 14)
+        except Exception:
+            pass
+        now = time.time()
+        if now - last_candle_t >= _cint:
+            try:
+                with _get_quotex_minute_fetch_lock_for_client(c):
+                    lst = run_async_for(
+                        email,
+                        _fetch_quotex_minute_candles_async(c, asset),
+                        _fto,
+                    )
+                if lst:
+                    _central_set_candles(asset, lst)
+            except Exception as e:
+                log.debug("سوق مركزي شموع %s: %s", asset, e)
+            last_candle_t = now
+        time.sleep(0.4)
+    with _central_rlock:
+        fd = _central_feeders.get(asset)
+        if fd and fd.get("stop") is stop_ev:
+            _central_feeders.pop(asset, None)
+
+
+def _central_ensure_feeder(asset: str, email: str, client) -> None:
+    if not _central_market_enabled() or not QX or not client or not asset:
+        return
+    with _central_rlock:
+        fd = _central_feeders.get(asset)
+        if fd:
+            th = fd.get("thread")
+            cr = fd.get("client_ref")
+            if th and th.is_alive() and cr and cr() is not None:
+                return
+            try:
+                fd.get("stop", threading.Event()).set()
+            except Exception:
+                pass
+            _central_feeders.pop(asset, None)
+        stop_ev = threading.Event()
+        cref = weakref.ref(client)
+        t = threading.Thread(
+            target=_central_feeder_thread_main,
+            args=(asset, email, cref, stop_ev),
+            daemon=True,
+            name=f"nexora-md-{asset}",
+        )
+        _central_feeders[asset] = {
+            "stop": stop_ev,
+            "thread": t,
+            "email": email,
+            "client_ref": cref,
+        }
+    t.start()
+    log.info("📡 سوق مركزي: مغذّي %s يعمل عبر حساب %s", asset, email)
+
+
 def _quotex_tick_keys(client, asset: str):
     """مفاتيح تيك السعر: الرمز أولاً (غالباً يطابق message[0][0]) ثم رقم الأصل."""
     keys = [asset]
@@ -2341,7 +2512,7 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
         t0 = out[0].get("time")
         t1 = out[-1].get("time")
         _tl = time.time()
-        _throttle = label == "quotex_1m_cache" and (
+        _throttle = label in ("quotex_1m_cache", "quotex_1m_central") and (
             _tl - _husaam_ema10_analysis_log_ts.get(_ck, 0) < 30
         )
         if not _throttle:
@@ -2357,6 +2528,17 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
             )
             _husaam_ema10_analysis_log_ts[_ck] = _tl
         return out, label
+
+    if _central_market_enabled() and QX and client:
+        snap = _central_get_candle_snapshot(asset)
+        if snap and snap.get("candles"):
+            _snap_age = now - float(snap.get("t") or 0)
+            if _snap_age < max(_HUSAAM_QUOTEX_CACHE_SEC * 2, 120.0):
+                prep_c = _prepare_husaam_ema10_candles_for_analysis(
+                    snap["candles"], max_bars=tgt
+                )
+                if len(prep_c) >= tgt:
+                    return _finalize(snap["candles"], "quotex_1m_central")
 
     if (
         ce
@@ -2613,6 +2795,7 @@ async def _check_win(client, tid):
 async def _close(client):
     try:
         if client:
+            _central_detach_client(client)
             api = getattr(client, "api", None)
             try:
                 await client.close()
@@ -2677,7 +2860,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     # منع تكرار نفس الإشارة أكثر من مرة في نفس دقيقة الشمعة
     signal_attempted = {}
 
-    # ── بدء تدفق الأسعار الحية لكل الأزواج ───────────────────────────────────
+    # ── بدء تدفق الأسعار: إما سوق مركزي (مغذّي واحد لكل زوج) أو ستريم لكل حساب ──
     if QX and S["client"]:
         try:
             _assets_to = float(os.getenv("QUOTEX_GET_ALL_ASSETS_TIMEOUT_SEC", "75") or 75)
@@ -2685,11 +2868,15 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             run_async_for(S["email"], _ensure_quotex_assets(S["client"]), _assets_to)
         except Exception:
             pass
-        for a in all_assets:
-            try:
-                run_async_for(S["email"], _start_price_stream(S["client"], a), 20)
-            except Exception:
-                pass
+        if _central_market_enabled():
+            for a in all_assets:
+                _central_ensure_feeder(a, S["email"], S["client"])
+        else:
+            for a in all_assets:
+                try:
+                    run_async_for(S["email"], _start_price_stream(S["client"], a), 20)
+                except Exception:
+                    pass
 
     # ── جمع تيكات للمراقبة فقط — التحليل من شموع 1m من Quotex لجميع الاستراتيجيات عند الاتصال
     _wu = (
@@ -2701,15 +2888,18 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     log.info("⏳ جمع أسعار حية للمراقبة — %s ثانية...", _wu)
     warmup = time.time()
     while time.time() - warmup < _wu and not _should_stop():
-        if QX and S["client"]:
+        if QX and S["client"] and not _central_market_enabled():
             for a in all_assets:
                 _collect_price(S["client"], a, S["email"])
         stop.wait(timeout=1)
     if _should_stop(): return
 
-    _tick_total = sum(
-        len(_price_buffers.get(_session_price_key(S["email"], a), [])) for a in all_assets
-    )
+    if _central_market_enabled():
+        _tick_total = sum(_central_ticks_len(a) for a in all_assets)
+    else:
+        _tick_total = sum(
+            len(_price_buffers.get(_session_price_key(S["email"], a), [])) for a in all_assets
+        )
     log.info("✅ مراقبة: %s تيك محفوظ — بدء الحلقة (%s)", _tick_total, req.strategy)
     S["status_msg"] = ""
 
@@ -2749,11 +2939,10 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
     while not _should_stop():
         try:
-            # ── جمع الأسعار الحية ──────────────────────────────────────────
-            if QX and S["client"]: _collect_price(S["client"], req.asset, S["email"])
-
-            # جمع سعر إضافي
-            if QX and S["client"]: _collect_price(S["client"], req.asset, S["email"])
+            # ── جمع الأسعار الحية (السوق المركزي يغذّي المخزن منفصلاً) ────────
+            if QX and S["client"] and not _central_market_enabled():
+                _collect_price(S["client"], req.asset, S["email"])
+                _collect_price(S["client"], req.asset, S["email"])
 
             # ── تحليل الشمعات ─────────────────────────────────────────────
             direction = "wait"
@@ -2762,9 +2951,12 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             any_candles = False
 
             if QX and S["logged_in"] and S["client"]:
-                # جمع أسعار لكل الأزواج
-                for a in all_assets:
-                    _collect_price(S["client"], a, S["email"])
+                if _central_market_enabled():
+                    for a in all_assets:
+                        _central_ensure_feeder(a, S["email"], S["client"])
+                else:
+                    for a in all_assets:
+                        _collect_price(S["client"], a, S["email"])
 
                 # تحليل كل الأزواج واختيار الأقوى إشارة
                 best_score = 0
