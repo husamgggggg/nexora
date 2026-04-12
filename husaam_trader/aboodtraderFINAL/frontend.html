@@ -274,6 +274,10 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .oi-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
 .oi-main{display:flex;align-items:center;gap:8px;min-width:0;}
 .oi-flag{width:16px;height:12px;border-radius:2px;object-fit:cover;border:1px solid rgba(255,255,255,.14);display:block;}
+.oi-gen,.vaf-gen{display:inline-flex;align-items:center;justify-content:center;min-width:14px;height:12px;padding:0 2px;border-radius:2px;background:linear-gradient(145deg,#3d4f6b,#283548);color:#d0dce8;font-size:7px;font-weight:900;line-height:1;border:1px solid rgba(255,255,255,.12);box-sizing:border-box;}
+.vaf-gen{min-width:12px;height:10px;font-size:6px;}
+.oi-gen.oi-metal,.vaf-gen.oi-metal{background:linear-gradient(145deg,#c9a227,#7a5c1a);color:#fff;border-color:rgba(255,220,120,.25);}
+.oi-ic,.vaf-flags{display:inline-flex;align-items:center;gap:3px;flex-shrink:0;}
 .vAsset-bar{min-width:0;flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:4px 5px;font-size:11px;font-weight:800;line-height:1.25;color:var(--tx);}
 .vaf-chip{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%;}
 .vaf-flags{display:inline-flex;align-items:center;gap:2px;flex-shrink:0;}
@@ -550,7 +554,7 @@ h1{font-size:18px;}
   </div>
   <div class="sl">الإعدادات</div>
   <div class="sc">
-    <div class="sr" onclick="om('assets')"><div class="sv"><span id="vAsset" class="vAsset-bar">EURUSD OTC</span><span class="ch">‹</span></div><div class="slb">الأزواج المختارة</div></div>
+    <div class="sr" onclick="om('assets')"><div class="sv"><span id="vAsset" class="vAsset-bar">EUR/USD (OTC)</span><span class="ch">‹</span></div><div class="slb">الأزواج المختارة</div></div>
     <div class="sr" onclick="om('strategy')"><div class="sv"><span id="vStrat">NEXORA</span><span class="ch">‹</span></div><div class="slb">الاستراتيجية</div></div>
   </div>
   <div class="sl">المبلغ والحدود</div>
@@ -697,7 +701,12 @@ const DEFAULT_ASSETS=[...DEFAULT_ASSETS_OTC,...DEFAULT_ASSETS_LIVE];
 const ASSETS_REFRESH_INTERVAL_MS=10*60*1000;
 const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetsAwaitingQuotex:false,assetsQuotexSynced:false,assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0};
 const MAX_ASSETS=3;
-const PAIR_FLAGS={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz'};
+const FIAT_FLAG={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz',CHF:'ch',MXN:'mx',TRY:'tr',ZAR:'za',CNY:'cn',CNH:'cn',HKD:'hk',SGD:'sg',NOK:'no',SEK:'se',DKK:'dk',PLN:'pl',RUB:'ru',INR:'in',BRL:'br',KRW:'kr',THB:'th',IDR:'id',PHP:'ph',MYR:'my',HUF:'hu',CZK:'cz',ILS:'il',AED:'ae',SAR:'sa',USDT:'us',USDC:'us',BUSD:'us',TUSD:'us',DAI:'us'};
+const QUOTE_SUFFIXES=['USDT','USDC','BUSD','TUSD','DAI','EUR','GBP','USD','JPY','AUD','CAD','CHF','NZD','MXN','TRY','ZAR','SEK','NOK','DKK','PLN','CNY','CNH','HKD','SGD','INR','RUB','BRL','KRW','THB','IDR','PHP','MYR','HUF','CZK','ILS','AED','SAR'];
+const CRYPTO_ICON_BASE='https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color';
+const CRYPTO_ICON_SLUG={BTC:'btc',ETH:'eth',BNB:'bnb',BCH:'bch',LTC:'ltc',XRP:'xrp',ADA:'ada',SOL:'sol',DOGE:'doge',TRX:'trx',DOT:'dot',LINK:'link',AVAX:'avax',AVA:'avax',ATOM:'atom',NEAR:'near',APT:'apt',ARB:'arb',OP:'op',XLM:'xlm',ETC:'etc',FIL:'fil',ICP:'icp',SHIB:'shib',UNI:'uni',AXS:'axs',MATIC:'matic',LRC:'lrc',APE:'ape',CRO:'cro',FTM:'ftm',ALGO:'algo',MANA:'mana',SAND:'sand',GRT:'grt',EOS:'eos',XTZ:'xtz',XMR:'xmr',ZEC:'zec',DASH:'dash',NEO:'neo',QTUM:'qtum',WAVES:'waves',THETA:'theta',VET:'vet',HBAR:'hbar',INJ:'inj',SUI:'sui',SEI:'sei',TIA:'tia',ORDI:'ordi',WIF:'wif',BONK:'bonk',PEPE:'pepe',FET:'fet',LUNA:'luna',RUNE:'rune',CRV:'crv',MKR:'mkr',SNX:'snx',COMP:'comp',YFI:'yfi',SUSHI:'sushi',AAVE:'aave',ENJ:'enj',CHZ:'chz',FLOW:'flow',GALA:'gala',IMX:'imx',STX:'stx',TWT:'twt',PAXG:'paxg','1INCH':'1inch'};
+const METAL_BADGE={XAU:'Au',XAG:'Ag',XPT:'Pt',XPD:'Pd'};
+const COMMODITY_BADGE={OIL:'Oil',WTI:'WTI',BRENT:'Br',NATGAS:'Ng',XBR:'Br',XTI:'WT',XNG:'Ng'};
 DEFAULT_ASSETS.forEach(a=>{
   const min=a.endsWith('_otc')?72:60;
   const max=a.endsWith('_otc')?92:86;
@@ -798,30 +807,50 @@ const STRATEGIES=[
   {key:'HUSAAM_EMA10',label:'NEXORA EMA10',sub:'ارتدادات EMA10 على شموع الدقيقة مع تأكيد مغلق'}
 ];
 const STRAT_LABELS={HUSAAM:'NEXORA',HUSAAM_EMA10:'EMA10'};
-function pairFlags(asset){
-  const p=asset.replace('_otc','');
-  const b=p.slice(0,3),q=p.slice(3,6);
-  return [PAIR_FLAGS[b]||'un',PAIR_FLAGS[q]||'un'];
-}
-function pairLabel(asset){return asset.replace('_otc',' OTC');}
-function pairPayout(asset){return `${s.assetPayout[asset]||80}%`;}
-function renderPairOption(asset){
-  const [b,q]=pairFlags(asset);
-  const flags=(b!=='un'&&q!=='un')
-    ?`<img class="oi-flag" src="https://flagcdn.com/w20/${b}.png" alt="${b}"><img class="oi-flag" src="https://flagcdn.com/w20/${q}.png" alt="${q}">`
-    :'';
-  return `<div class="oi-row"><div class="oi-main"><span class="oi-check">✓</span></div><div class="oi-main"><span class="oi-name">${pairLabel(asset)}</span>${flags}</div></div>`;
-}
 function escHtml(t){
   return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+function splitBaseQuote(asset){
+  const raw0=String(asset||'');
+  const otc=/_otc$/i.test(raw0);
+  let raw=raw0.replace(/_otc$/i,'').toUpperCase();
+  for(let i=0;i<QUOTE_SUFFIXES.length;i++){
+    const q=QUOTE_SUFFIXES[i];
+    if(raw.length>q.length&&raw.endsWith(q))return{base:raw.slice(0,-q.length),quote:q,otc};
+  }
+  if(raw.length===6&&/^[A-Z]{6}$/.test(raw))return{base:raw.slice(0,3),quote:raw.slice(3),otc};
+  return{base:raw,quote:'',otc};
+}
+function pairLabel(asset){
+  const{base,quote,otc}=splitBaseQuote(asset);
+  let t=quote?`${base}/${quote}`:base;
+  if(otc)t+=' (OTC)';
+  return t;
+}
+function tokenIconHtml(tok,imgCls,genCls){
+  const u=String(tok||'').toUpperCase();
+  if(!u)return `<span class="${genCls}" aria-hidden="true">·</span>`;
+  if(METAL_BADGE[u])return `<span class="${genCls} oi-metal">${escHtml(METAL_BADGE[u])}</span>`;
+  if(COMMODITY_BADGE[u])return `<span class="${genCls} oi-metal">${escHtml(COMMODITY_BADGE[u])}</span>`;
+  if(FIAT_FLAG[u])return `<img class="${imgCls}" src="https://flagcdn.com/w20/${FIAT_FLAG[u]}.png" alt="">`;
+  const slug=CRYPTO_ICON_SLUG[u]||null;
+  if(slug)return `<img class="${imgCls}" src="${CRYPTO_ICON_BASE}/${slug}.png" alt="">`;
+  return `<span class="${genCls}">${escHtml(u.slice(0,Math.min(3,u.length)))}</span>`;
+}
+function pairIconsHtml(asset,imgCls,genCls){
+  const{base,quote}=splitBaseQuote(asset);
+  if(quote)return `<span class="oi-ic">${tokenIconHtml(base,imgCls,genCls)}${tokenIconHtml(quote,imgCls,genCls)}</span>`;
+  return `<span class="oi-ic">${tokenIconHtml(base,imgCls,genCls)}${tokenIconHtml('USD',imgCls,genCls)}</span>`;
+}
+function pairPayout(asset){return `${s.assetPayout[asset]||80}%`;}
+function renderPairOption(asset){
+  const icons=pairIconsHtml(asset,'oi-flag','oi-gen');
+  return `<div class="oi-row"><div class="oi-main"><span class="oi-check">✓</span></div><div class="oi-main"><span class="oi-name">${escHtml(pairLabel(asset))}</span>${icons}</div></div>`;
+}
 function renderAssetLabelChip(asset){
   if(!asset)return '';
-  const [b,q]=pairFlags(asset);
-  const flags=(b!=='un'&&q!=='un')
-    ?`<span class="vaf-flags"><img class="oi-flag vaf-f" src="https://flagcdn.com/w20/${b}.png" alt=""><img class="oi-flag vaf-f" src="https://flagcdn.com/w20/${q}.png" alt=""></span>`
-    :'';
-  return `<span class="vaf-chip">${flags}<span class="vaf-txt">${escHtml(pairLabel(asset))}</span></span>`;
+  const icons=pairIconsHtml(asset,'oi-flag vaf-f','vaf-gen');
+  return `<span class="vaf-chip">${icons}<span class="vaf-txt">${escHtml(pairLabel(asset))}</span></span>`;
 }
 async function api(path,method='GET',body=null){
   const url='/api'+path;
@@ -980,7 +1009,7 @@ function showLive(asset,dir,secs,tradeId=''){
   const isUp=dir==='call';
   const ov=document.getElementById('ov');
   ov.dataset.tradeId=tradeId||'';
-  document.getElementById('lPair').textContent=asset.replace('_otc',' OTC');
+  document.getElementById('lPair').textContent=pairLabel(asset);
   document.getElementById('lStrat').textContent=(STRAT_LABELS[s.strategy]||s.strategy).toUpperCase()+' STRATEGY';
   document.getElementById('lDir').textContent=isUp?'▲ شراء':'▼ بيع';
   document.getElementById('lDir').className='ld '+(isUp?'up':'dn');
@@ -1020,7 +1049,7 @@ function startPoll(){
       if(String(s.hiddenLiveTradeId||'')!==tid)showLive(d.current_trade.asset,d.current_trade.direction,Number(d.current_trade.duration||60),tid);
       if(tid && s.lastTradePopupId!==tid){
         s.lastTradePopupId=tid;
-        const a=(d.current_trade.asset||'').replace('_otc',' OTC');
+        const a=pairLabel(d.current_trade.asset||'');
         const dr=d.current_trade.direction==='call'?'شراء':'بيع';
         showTradePopup(`تم فتح صفقة ${dr} على ${a}`);
       }
@@ -1196,13 +1225,13 @@ function addLog(tr){
   if(!list)return;
   const nt=list.querySelector('.nt');if(nt)nt.remove();
   const win=tr.status==='win';const el=document.createElement('div');el.className='tli';
-  el.innerHTML=`<div class="tlr ${win?'w':tr.status==='loss'?'l':''}">${tr.status==='pending'?'جارية...':(win?'+':'')+tr.profit+' '+s.currency}</div><div class="tld ${tr.direction==='call'?'up':'dn'}">${tr.direction==='call'?'▲ شراء':'▼ بيع'}</div><div><div class="tlp">${(tr.asset||'').replace('_otc',' OTC')}</div><div class="tlt">${new Date(tr.started_at).toLocaleTimeString('ar')}</div></div>`;
+    el.innerHTML=`<div class="tlr ${win?'w':tr.status==='loss'?'l':''}">${tr.status==='pending'?'جارية...':(win?'+':'')+tr.profit+' '+s.currency}</div><div class="tld ${tr.direction==='call'?'up':'dn'}">${tr.direction==='call'?'▲ شراء':'▼ بيع'}</div><div><div class="tlp">${escHtml(pairLabel(tr.asset||''))}</div><div class="tlt">${new Date(tr.started_at).toLocaleTimeString('ar')}</div></div>`;
   list.insertBefore(el,list.firstChild);while(list.children.length>50)list.removeChild(list.lastChild);
 }
 function renderLogs(trades){
   const list=document.getElementById('logL');if(!list)return;list.innerHTML='';
   trades.forEach(t=>{const win=t.status==='win';const el=document.createElement('div');el.className='tli';
-    el.innerHTML=`<div class="tlr ${win?'w':'l'}">${win?'+':''}${t.profit||0} ${s.currency}</div><div class="tld ${t.direction==='call'?'up':'dn'}">${t.direction==='call'?'▲ شراء':'▼ بيع'}</div><div><div class="tlp">${(t.asset||'').replace('_otc',' OTC')}</div><div class="tlt">${new Date(t.started_at).toLocaleTimeString('ar')}</div></div>`;
+    el.innerHTML=`<div class="tlr ${win?'w':'l'}">${win?'+':''}${t.profit||0} ${s.currency}</div><div class="tld ${t.direction==='call'?'up':'dn'}">${t.direction==='call'?'▲ شراء':'▼ بيع'}</div><div><div class="tlp">${escHtml(pairLabel(t.asset||''))}</div><div class="tlt">${new Date(t.started_at).toLocaleTimeString('ar')}</div></div>`;
     list.appendChild(el);});
 }
 function selAcc(t){s.acc=t;document.getElementById('bReal').classList.toggle('sel',t==='real');document.getElementById('bDemo').classList.toggle('sel',t==='demo');}
@@ -1324,6 +1353,7 @@ if(_em){
 }
 setLang('ar');
 checkConn();
+updAssetLabel();
 </script>
 <script>
 if ('serviceWorker' in navigator) {
