@@ -8,7 +8,7 @@ NEXORA TRADE Bot — النسخة النهائية الكاملة
 ✅ متعدد المشتركين كل بحسابه المستقل
 ✅ إشعار عند تحقق الهدف
 """
-import asyncio, base64, html, json, logging, os, queue, random, re, socket, ssl, subprocess
+import asyncio, base64, hashlib, html, json, logging, os, queue, random, re, socket, ssl, subprocess, sys
 import secrets, threading, time, traceback
 from contextlib import asynccontextmanager
 import urllib.parse
@@ -178,6 +178,15 @@ logging.basicConfig(
 )
 log = logging.getLogger("NexoraTrade")
 
+# تشخيص: قيم الجسر من البيئة الفعلية لعملية bot (systemd ≠ شِل تفاعلي؛ راجع EnvironmentFile في الخدمة).
+_raw_qx_bridge = os.getenv("QUOTEX_USE_PLAYWRIGHT_BRIDGE")
+USE_QX_BRIDGE = os.getenv("QUOTEX_USE_PLAYWRIGHT_BRIDGE", "0").strip() == "1"
+USE_QX_BRIDGE_CODEPATH = (_raw_qx_bridge or "").strip().lower() in ("1", "true", "yes", "on")
+log.info("ENV QUOTEX_USE_PLAYWRIGHT_BRIDGE raw=%r", _raw_qx_bridge)
+log.info("ENV QUOTEX_USE_PLAYWRIGHT_BRIDGE parsed=%s", USE_QX_BRIDGE)
+log.info("ENV QUOTEX_USE_PLAYWRIGHT_BRIDGE parsed_like_start_websocket=%s", USE_QX_BRIDGE_CODEPATH)
+log.info("ENV QUOTEX_PROXY_URL raw_present=%s", bool(os.getenv("QUOTEX_PROXY_URL")))
+
 if _QX_IMPORT_ERR is not None:
     log.warning("pyquotex غير محمّل — وضع محاكاة. السبب: %s", _QX_IMPORT_ERR)
 
@@ -188,6 +197,81 @@ def _configure_quiet_loggers():
 
 
 _configure_quiet_loggers()
+
+
+def _install_websocket_proxy_tunnel_auth_fix():
+    """
+    websocket-client/_http._tunnel قد لا يرسل Proxy-Authorization إلا إذا كان اسم المستخدم truthy.
+    نرسل Basic عند وجود مستخدم أو كلمة مرور؛ ترميز latin-1 مع احتياط utf-8.
+    """
+    try:
+        import websocket._http as wh
+        from base64 import encodebytes as base64encode
+    except Exception:
+        return
+    if getattr(wh._tunnel, "_nexora_tunnel_auth_fix", False):
+        return
+
+    def _tunnel(sock, host, port, auth):
+        wh.debug("Connecting proxy...")
+        connect_header = f"CONNECT {host}:{port} HTTP/1.1\r\n"
+        connect_header += f"Host: {host}:{port}\r\n"
+        connect_header += "Proxy-Connection: Keep-Alive\r\n"
+        if auth:
+            u = auth[0] if len(auth) > 0 and auth[0] is not None else ""
+            p = auth[1] if len(auth) > 1 and auth[1] is not None else ""
+            u, p = str(u), str(p)
+            if u or p:
+                _, enc = _build_basic_proxy_auth(u, p)
+                enc = enc.strip().replace("\n", "")
+                try:
+                    log.info(
+                        "WS proxy CONNECT auth | user_len=%s | user_fp=%s | pass_len=%s | pass_fp=%s | basic_fp=%s",
+                        len(u),
+                        _secret_fingerprint(u),
+                        len(p),
+                        _secret_fingerprint(p),
+                        _secret_fingerprint(enc),
+                    )
+                except Exception:
+                    pass
+                connect_header += f"Proxy-Authorization: Basic {enc}\r\n"
+        connect_header += "\r\n"
+        wh.dump("request header", connect_header)
+        wh.send(sock, connect_header)
+        try:
+            status, hdrs, _ = wh.read_headers(sock)
+        except (OSError, wh.WebSocketException) as e:
+            raise wh.WebSocketProxyException(str(e))
+        if status != 200:
+            pauth_sent = False
+            if auth:
+                au = auth[0] if len(auth) > 0 and auth[0] is not None else ""
+                ap = auth[1] if len(auth) > 1 and auth[1] is not None else ""
+                pauth_sent = bool(str(au).strip() or str(ap).strip())
+            wwa = ""
+            if isinstance(hdrs, dict):
+                wwa = str(
+                    hdrs.get("proxy-authenticate") or hdrs.get("www-authenticate") or ""
+                ).strip()[:220]
+            try:
+                log.warning(
+                    "WS proxy CONNECT failed status=%s proxy_auth_sent=%s proxy_www=%s",
+                    status,
+                    pauth_sent,
+                    wwa or "-",
+                )
+            except Exception:
+                pass
+            raise wh.WebSocketProxyException(f"failed CONNECT via proxy status: {status}")
+        return sock
+
+    _tunnel._nexora_tunnel_auth_fix = True
+    wh._tunnel = _tunnel
+    log.info("تم تطبيق تصحيح websocket-client لمصادقة بروكسي CONNECT (407)")
+
+
+_install_websocket_proxy_tunnel_auth_fix()
 
 
 def _init_zenrows_for_pyquotex():
@@ -201,57 +285,342 @@ def _init_zenrows_for_pyquotex():
         return None
 
 
+def _strip_wrapping_quotes(s: str) -> str:
+    s = (s or "").strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
+        return s[1:-1].strip()
+    return s
+
+
+def _secret_fingerprint(value: str) -> str:
+    s = str(value or "")
+    if not s:
+        return "-"
+    return hashlib.sha256(s.encode("utf-8", errors="replace")).hexdigest()[:12]
+
+
+def _build_basic_proxy_auth(user: str, pwd: str):
+    auth_str = f"{user}:{pwd}"
+    try:
+        raw = auth_str.encode("latin-1")
+    except UnicodeEncodeError:
+        raw = auth_str.encode("utf-8")
+    token = base64.b64encode(raw).decode("ascii")
+    return auth_str, token
+
+
+def _log_ws_proxy_auth_resolution(source: str, user: str, pwd: str):
+    try:
+        _, basic_token = _build_basic_proxy_auth(user, pwd)
+        log.info(
+            "WS proxy auth resolved | source=%s | user_len=%s | user_fp=%s | pass_len=%s | pass_fp=%s | basic_fp=%s",
+            source or "unknown",
+            len(user or ""),
+            _secret_fingerprint(user),
+            len(pwd or ""),
+            _secret_fingerprint(pwd),
+            _secret_fingerprint(basic_token),
+        )
+    except Exception:
+        pass
+
+
+def _pick_proxy_url_for_ws(proxies: dict) -> str:
+    """يختار رابط البروكسي الذي يحوي userinfo (@) إن وُجد (https بدون بيانات وhttp فيها يكسر WS)."""
+    if not isinstance(proxies, dict):
+        return ""
+    https_u = _strip_wrapping_quotes(str(proxies.get("https") or ""))
+    http_u = _strip_wrapping_quotes(str(proxies.get("http") or ""))
+    pool = []
+    for cand in (https_u, http_u):
+        if cand and cand not in pool:
+            pool.append(cand)
+    if not pool:
+        return ""
+    for cand in pool:
+        try:
+            prep = cand if "://" in cand else f"http://{cand}"
+            p = urllib.parse.urlsplit(prep)
+        except Exception:
+            continue
+        if "@" in (p.netloc or ""):
+            return cand if "://" in cand else f"http://{cand}"
+    return pool[0]
+
+
+def _extract_proxy_credentials_from_raw_url(raw: str):
+    """(user, pass) عند فشل urlparse بسبب أحرف خاصة في كلمة المرور."""
+    s = _strip_wrapping_quotes((raw or "").strip())
+    if not s or "@" not in s:
+        return None
+    if "://" not in s:
+        s = "http://" + s
+    try:
+        _, rest = s.split("://", 1)
+        authority = rest.split("/")[0]
+    except ValueError:
+        return None
+    if "@" not in authority:
+        return None
+    userinfo, _, hostport = authority.rpartition("@")
+    if not hostport.strip() or not userinfo:
+        return None
+    if ":" in userinfo:
+        user, pwd = userinfo.split(":", 1)
+    else:
+        user, pwd = userinfo, ""
+    user = urllib.parse.unquote(user.strip())
+    pwd = urllib.parse.unquote(pwd)
+    if user or pwd:
+        return (user, pwd)
+    return None
+
+
+_ENV_KEYS_PROXY_AUTH = (
+    "ZENROWS_PROXY_URL",
+    "ZENROWS_PROXY_HTTPS",
+    "ZENROWS_PROXY_HTTP",
+    "QUOTEX_PROXY_URL",
+    "QUOTEX_PROXY_HTTPS",
+    "QUOTEX_PROXY_HTTP",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "ALL_PROXY",
+)
+
+
+def _first_proxy_auth_from_env():
+    for key in _ENV_KEYS_PROXY_AUTH:
+        raw = os.getenv(key, "").strip()
+        if not raw:
+            continue
+        creds = _extract_proxy_credentials_from_raw_url(raw)
+        if creds and (creds[0] or creds[1]):
+            return creds, key
+    return None, ""
+
+
+def _apply_ws_proxy_auth_env_overrides(user: str, pwd: str):
+    eu = os.getenv("QUOTEX_WS_PROXY_USER", "").strip()
+    ep = os.getenv("QUOTEX_WS_PROXY_PASSWORD", "").strip()
+    al = os.getenv("QUOTEX_WS_PROXY_AUTH", "").strip()
+    source = ""
+    if al and ":" in al:
+        au, ap = al.split(":", 1)
+        eu = eu or urllib.parse.unquote(au.strip())
+        ep = ep or urllib.parse.unquote(ap)
+        source = "QUOTEX_WS_PROXY_AUTH"
+    if eu or ep:
+        source = "QUOTEX_WS_PROXY_USER/PASSWORD"
+    if not eu and not ep:
+        return (user, pwd, source)
+    return (eu or user, ep or pwd, source)
+
+
 def _parse_ws_proxy_from_http_proxies(proxies):
     """
-    يحوّل proxies الخاصة بـ HTTP إلى kwargs مفهومة من websocket-client.
+    يحوّل proxies الخاصة بـ HTTP إلى kwargs لـ websocket-client:
+    http_proxy_host = hostname فقط، منفذ منفصل، http_proxy_auth=(user,pass) عند الحاجة.
     """
     if not isinstance(proxies, dict):
         return {}
-    raw = str(proxies.get("https") or proxies.get("http") or "").strip()
-    raw = raw.strip(" \t\n\r\"'")
-    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
-        raw = raw[1:-1].strip()
+    raw = _pick_proxy_url_for_ws(proxies)
+    raw = _strip_wrapping_quotes(raw)
     if not raw:
         return {}
+    norm = raw
+    if "://" not in norm and "@" in norm:
+        norm = "http://" + norm
+    elif "://" not in norm:
+        norm = "http://" + norm
     try:
-        u = urllib.parse.urlparse(raw)
+        u = urllib.parse.urlparse(norm)
     except Exception:
         return {}
     host = u.hostname
     if not host:
         return {}
-    port = None
-    try:
-        port = u.port
-    except ValueError:
-        port = None
+    port = u.port
     if port is None and u.netloc:
-        tail = u.netloc.split("@")[-1]
+        tail = u.netloc.rsplit("@", 1)[-1]
         if ":" in tail:
             maybe = tail.rsplit(":", 1)[-1].strip().strip('"').strip("'")
             if maybe.isdigit():
                 port = int(maybe)
     if not port:
-        return {}
+        scheme = (u.scheme or "http").lower()
+        port = 1080 if scheme.startswith("socks") else 80
 
-    scheme = (u.scheme or "http").lower()
-    if scheme.startswith("socks5"):
+    scheme_l = (u.scheme or "http").lower()
+    if scheme_l.startswith("socks5"):
         ptype = "socks5"
-    elif scheme.startswith("socks4"):
+    elif scheme_l.startswith("socks4"):
         ptype = "socks4"
     else:
         ptype = "http"
+
+    user = urllib.parse.unquote(u.username) if u.username else ""
+    pwd = urllib.parse.unquote(u.password) if u.password else ""
+    auth_source = "proxy_url_parsed" if (user or pwd) else ""
+    if not user and not pwd:
+        manual = _extract_proxy_credentials_from_raw_url(norm)
+        if manual:
+            user, pwd = manual
+            auth_source = "proxy_url_raw_userinfo"
+    if not user and not pwd:
+        env_auth, env_key = _first_proxy_auth_from_env()
+        if env_auth:
+            user, pwd = env_auth
+            auth_source = f"env:{env_key}"
+    user, pwd, override_source = _apply_ws_proxy_auth_env_overrides(user, pwd)
+    if override_source and (user or pwd):
+        auth_source = f"override:{override_source}"
 
     ws_proxy = {
         "http_proxy_host": host,
         "http_proxy_port": int(port),
         "proxy_type": ptype,
     }
-    user = urllib.parse.unquote(u.username) if u.username else None
-    pwd = urllib.parse.unquote(u.password) if u.password else None
-    if user:
-        ws_proxy["http_proxy_auth"] = (user, pwd or "")
+    if user or pwd:
+        _log_ws_proxy_auth_resolution(auth_source or "unknown", user, pwd)
+        ws_proxy["http_proxy_auth"] = (user, pwd)
+    else:
+        log.warning(
+            "بروكسي WS بدون مصادقة — CONNECT قد يرجع 407. أضف user:pass في الرابط أو "
+            "QUOTEX_WS_PROXY_USER / QUOTEX_WS_PROXY_PASSWORD"
+        )
     return ws_proxy
+
+
+def _recv_until_http_headers_end(sock_obj, max_bytes: int = 65536) -> bytes:
+    buf = bytearray()
+    while b"\r\n\r\n" not in buf:
+        chunk = sock_obj.recv(4096)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise ValueError("HTTP proxy response headers too large")
+    return bytes(buf)
+
+
+def _parse_http_connect_response(raw: bytes):
+    head = raw.split(b"\r\n\r\n", 1)[0]
+    text = head.decode("iso-8859-1", errors="replace")
+    lines = text.split("\r\n")
+    status_line = lines[0] if lines else ""
+    parts = status_line.split(" ", 2)
+    try:
+        status = int(parts[1]) if len(parts) > 1 else 0
+    except Exception:
+        status = 0
+    headers = {}
+    for line in lines[1:]:
+        if ":" not in line:
+            continue
+        k, v = line.split(":", 1)
+        headers[k.strip().lower()] = v.strip()
+    return status, status_line, headers
+
+
+def _open_manual_http_connect_tunnel(target_host: str, target_port: int, proxy_conf: dict):
+    px_host = str(proxy_conf.get("http_proxy_host") or "").strip()
+    px_port = int(proxy_conf.get("http_proxy_port") or 0)
+    auth = proxy_conf.get("http_proxy_auth")
+    if not px_host or not px_port:
+        raise ValueError("Manual CONNECT requires http proxy host/port")
+
+    log.info(
+        "WS manual CONNECT start | proxy=%s:%s | target=%s:%s",
+        px_host,
+        px_port,
+        target_host,
+        target_port,
+    )
+    sock_obj = socket.create_connection((px_host, px_port), timeout=15)
+    try:
+        sock_obj.settimeout(20)
+    except Exception:
+        pass
+
+    req = [
+        f"CONNECT {target_host}:{target_port} HTTP/1.1",
+        f"Host: {target_host}:{target_port}",
+        "Proxy-Connection: Keep-Alive",
+        "User-Agent: curl/7.81.0",
+    ]
+    if auth:
+        u = auth[0] if len(auth) > 0 and auth[0] is not None else ""
+        p = auth[1] if len(auth) > 1 and auth[1] is not None else ""
+        u, p = str(u), str(p)
+        if u or p:
+            _, basic_token = _build_basic_proxy_auth(u, p)
+            log.info(
+                "WS manual CONNECT auth | user_len=%s | user_fp=%s | pass_len=%s | pass_fp=%s | basic_fp=%s",
+                len(u),
+                _secret_fingerprint(u),
+                len(p),
+                _secret_fingerprint(p),
+                _secret_fingerprint(basic_token),
+            )
+            req.append(f"Proxy-Authorization: Basic {basic_token}")
+    payload = ("\r\n".join(req) + "\r\n\r\n").encode("iso-8859-1", errors="replace")
+    sock_obj.sendall(payload)
+    raw_resp = _recv_until_http_headers_end(sock_obj)
+    status, status_line, headers = _parse_http_connect_response(raw_resp)
+    proxy_www = str(headers.get("proxy-authenticate") or headers.get("www-authenticate") or "").strip()[:220]
+    if status != 200:
+        try:
+            sock_obj.close()
+        except Exception:
+            pass
+        log.warning(
+            "WS manual CONNECT failed | status=%s | status_line=%s | proxy_www=%s",
+            status,
+            status_line or "-",
+            proxy_www or "-",
+        )
+        raise RuntimeError(f"manual CONNECT failed via proxy status: {status or status_line or 'unknown'}")
+    log.info(
+        "WS manual CONNECT ok | status=%s | status_line=%s",
+        status,
+        status_line or "HTTP/1.1 200 Connection Established",
+    )
+    return sock_obj
+
+
+def _build_preconnected_wss_socket(ws_url: str, sslopt: dict, proxy_conf: dict):
+    parsed = urllib.parse.urlparse(ws_url or "")
+    target_host = parsed.hostname or ""
+    target_port = int(parsed.port or (443 if (parsed.scheme or "").lower() == "wss" else 80))
+    if not target_host:
+        raise ValueError("Cannot resolve WebSocket target host for manual CONNECT")
+
+    plain_sock = _open_manual_http_connect_tunnel(target_host, target_port, proxy_conf)
+    if (parsed.scheme or "").lower() != "wss":
+        return plain_sock
+
+    ctx = sslopt.get("context")
+    if ctx is None:
+        ctx = ssl.create_default_context()
+        if sslopt.get("check_hostname") is False:
+            ctx.check_hostname = False
+        cert_reqs = sslopt.get("cert_reqs")
+        if cert_reqs is not None:
+            ctx.verify_mode = cert_reqs
+        ca_certs = sslopt.get("ca_certs")
+        if ca_certs:
+            try:
+                ctx.load_verify_locations(ca_certs)
+            except Exception:
+                pass
+    tls_sock = ctx.wrap_socket(plain_sock, server_hostname=target_host)
+    try:
+        tls_sock.settimeout(20)
+    except Exception:
+        pass
+    log.info("WS manual TLS wrap ok | host=%s | port=%s", target_host, target_port)
+    return tls_sock
 
 
 # ========== الحل البرمجي الجذري لتجاوز Cloudflare WebSocket ==========
@@ -505,8 +874,10 @@ def _ensure_playwright_bridge(target_ws_url: str):
         return f"ws://127.0.0.1:{_PW_BRIDGE_PORT}"
 
     port = _pick_free_port()
+    # systemd غالباً لا يضع `python` في PATH — نفس مفسّر bot.py (venv) يضمن تشغيل ws_bridge.
+    py_exe = (os.getenv("PYTHON_BIN") or "").strip() or sys.executable
     cmd = [
-        os.getenv("PYTHON_BIN", "python"),
+        py_exe,
         bridge_file,
         "--listen-host",
         "127.0.0.1",
@@ -631,9 +1002,62 @@ def _install_pyquotex_ws_proxy_patch(proxies):
             "sslopt": sslopt,
         }
 
-        # عند استخدام bridge المحلي لا نمرّر proxy للـWS.
+        # عند استخدام bridge المحلي لا نمرّر proxy للـWS — وإلا حقول websocket-client صراحةً.
         if not bridge_ws_url:
-            payload.update(ws_proxy)
+            px_host = str(ws_proxy.get("http_proxy_host") or "").strip()
+            try:
+                px_port = int(ws_proxy.get("http_proxy_port") or 0)
+            except (TypeError, ValueError):
+                px_port = 0
+            px_type = str(ws_proxy.get("proxy_type") or "http").strip() or "http"
+            auth_t = ws_proxy.get("http_proxy_auth")
+            u_pres = bool(
+                auth_t and len(auth_t) > 0 and auth_t[0] is not None and str(auth_t[0]).strip()
+            )
+            p_pres = bool(
+                auth_t and len(auth_t) > 1 and auth_t[1] is not None and str(auth_t[1]).strip()
+            )
+            log.info(
+                "WS direct proxy parsed | host=%s | port=%s | user_present=%s | pass_present=%s | proxy_type=%s",
+                px_host,
+                px_port,
+                u_pres,
+                p_pres,
+                px_type,
+            )
+            self.websocket.prepared_socket = None
+            use_manual_tunnel = px_type == "http" and bool(px_host and px_port)
+            if use_manual_tunnel:
+                try:
+                    self.websocket.prepared_socket = _build_preconnected_wss_socket(
+                        getattr(self.websocket, "url", "") or "",
+                        sslopt,
+                        ws_proxy,
+                    )
+                    log.info("WS direct using manual CONNECT tunnel via preinitialized socket")
+                except Exception as e:
+                    self.websocket.prepared_socket = None
+                    log.warning("WS manual CONNECT unavailable, fallback to websocket-client proxy path: %s", e)
+                    use_manual_tunnel = False
+            if not use_manual_tunnel:
+                payload["http_proxy_host"] = px_host
+                payload["http_proxy_port"] = px_port
+                payload["proxy_type"] = px_type
+                if u_pres or p_pres:
+                    u0 = str(auth_t[0]).strip() if auth_t and len(auth_t) > 0 and auth_t[0] is not None else ""
+                    p0 = (
+                        str(auth_t[1])
+                        if auth_t and len(auth_t) > 1 and auth_t[1] is not None
+                        else ""
+                    )
+                    payload["http_proxy_auth"] = (u0, p0)
+                else:
+                    payload.pop("http_proxy_auth", None)
+            else:
+                payload.pop("http_proxy_host", None)
+                payload.pop("http_proxy_port", None)
+                payload.pop("proxy_type", None)
+                payload.pop("http_proxy_auth", None)
 
         self.websocket_thread = _qx_api_mod.threading.Thread(
             target=self.websocket.run_forever, kwargs=payload
