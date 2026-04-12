@@ -2745,6 +2745,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 _need_len = _min_bars
                 _max_len = 0
                 ema_src_label = ""
+                _scan_rows = []  # (asset, dir, score) لبصمة دورة كاملة — يمنع تكرار 🔍 كل ثانية
                 for a in all_assets:
                     if req.strategy == "HUSAAM_PRIVATE":
                         candles, _csrc = _get_husaam_ema10_candles(
@@ -2779,18 +2780,24 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     if len(candles) >= _need_len:
                         any_candles = True
                         d, score = analyze_score(candles, req.strategy)
-                        _sig = f"{a}:{d}:{score}"
-                        _tn = time.time()
-                        if _tn - S.get("_last_scan_sig_ts", 0) >= 12 or S.get("_last_scan_sig") != _sig:
-                            log.info(f"🔍 {a}: {d.upper()} score={score}")
-                            S["_last_scan_sig_ts"] = _tn
-                            S["_last_scan_sig"] = _sig
+                        _scan_rows.append((a, d, score))
                         if d != "wait" and score > best_score:
                             # تجنب تكرار نفس الزوج إذا وجد بديل بنفس القوة
                             if score > best_score or a != last_used_asset:
                                 best_score = score
                                 best_dir   = d
                                 best_asset = a
+
+                _scan_iv = float(os.getenv("BOT_SCAN_LOG_INTERVAL_SEC", "12") or 12)
+                _scan_iv = max(3.0, min(_scan_iv, 120.0))
+                if _scan_rows:
+                    _fp = "|".join(f"{x[0]}:{x[1]}:{x[2]}" for x in _scan_rows)
+                    _tn = time.time()
+                    if _tn - S.get("_last_scan_fp_ts", 0) >= _scan_iv or S.get("_last_scan_fp") != _fp:
+                        for a, d, score in _scan_rows:
+                            log.info(f"🔍 {a}: {d.upper()} score={score}")
+                        S["_last_scan_fp"] = _fp
+                        S["_last_scan_fp_ts"] = _tn
 
                 S["candles_ok"] = any_candles
                 S["candle_source"] = ema_src_label
@@ -2799,7 +2806,19 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     direction    = best_dir
                     chosen_asset = best_asset
                     S["_wait_streak"] = 0
-                    log.info(f"🏆 أفضل زوج: {chosen_asset} → {direction.upper()} (score={best_score})")
+                    _trophy_fp = f"{chosen_asset}|{direction}|{best_score}"
+                    _trophy_tn = time.time()
+                    _trophy_iv = float(os.getenv("BOT_TROPHY_LOG_INTERVAL_SEC", "12") or 12)
+                    _trophy_iv = max(3.0, min(_trophy_iv, 120.0))
+                    if (
+                        _trophy_tn - S.get("_last_trophy_ts", 0) >= _trophy_iv
+                        or S.get("_last_trophy_fp") != _trophy_fp
+                    ):
+                        log.info(
+                            f"🏆 أفضل زوج: {chosen_asset} → {direction.upper()} (score={best_score})"
+                        )
+                        S["_last_trophy_fp"] = _trophy_fp
+                        S["_last_trophy_ts"] = _trophy_tn
                 elif not any_candles:
                     _now = time.time()
                     if _now - S.get("_last_candle_warn_ts", 0) >= 15:
