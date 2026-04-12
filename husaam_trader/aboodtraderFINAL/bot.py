@@ -753,6 +753,7 @@ QX_HTTP_PROXIES = _init_zenrows_for_pyquotex()
 _install_pyquotex_ws_proxy_patch(QX_HTTP_PROXIES)
 
 USERS_F  = "data/users.json"
+USERS_SESSIONS_F = "data/user_trading_sessions.json"
 ADMIN_PW = os.getenv("ADMIN_PW", "Admin@2024")
 _ALLOWED_ORIGINS_RAW = os.getenv(
     "ALLOWED_ORIGINS",
@@ -818,6 +819,128 @@ def _persist_admin_token(t: str):
 _load_admin_tokens_into_set()
 
 def save_users(): save(USERS_F, USERS)
+
+
+def _load_ux_sessions() -> list:
+    data = load(USERS_SESSIONS_F, [])
+    return data if isinstance(data, list) else []
+
+
+def _save_ux_sessions(arr: list) -> None:
+    try:
+        os.makedirs(os.path.dirname(USERS_SESSIONS_F) or ".", exist_ok=True)
+    except Exception:
+        pass
+    save(USERS_SESSIONS_F, arr)
+
+
+def _ux_finalize_open_for_email(
+    email: str,
+    end_real: float,
+    end_demo: float,
+    bot_pl: float,
+    currency: str,
+) -> None:
+    """إغلاق أي جلسة مفتوحة لنفس البريد (تسجيل دخول جديد أو إغلاق يدوي)."""
+    if not email:
+        return
+    arr = _load_ux_sessions()
+    now = datetime.now(timezone.utc).isoformat()
+    changed = False
+    for rec in arr:
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("email") != email or rec.get("ended_at") is not None:
+            continue
+        sr = float(rec.get("start_real") or 0)
+        sd = float(rec.get("start_demo") or 0)
+        er = round(float(end_real), 2)
+        ed = round(float(end_demo), 2)
+        rec["ended_at"] = now
+        rec["end_real"] = er
+        rec["end_demo"] = ed
+        rec["currency"] = currency or rec.get("currency") or "USD"
+        rec["pl_real"] = round(er - sr, 2)
+        rec["pl_demo"] = round(ed - sd, 2)
+        rec["bot_session_profit"] = round(float(bot_pl), 2)
+        changed = True
+    if changed:
+        _save_ux_sessions(arr)
+
+
+def _ux_session_open(S: dict) -> None:
+    """بعد نجاح تسجيل الدخول — رصيد البداية من أرصدة المنصة الحالية."""
+    email = (S or {}).get("email") or ""
+    if not email:
+        return
+    rec = {
+        "id": secrets.token_hex(10),
+        "email": email,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "ended_at": None,
+        "currency": str(S.get("currency") or "USD"),
+        "sim_mode": bool(_is_session_sim_mode(S)),
+        "start_real": round(float(S.get("real_balance") or 0), 2),
+        "start_demo": round(float(S.get("demo_balance") or 0), 2),
+        "end_real": None,
+        "end_demo": None,
+        "pl_real": None,
+        "pl_demo": None,
+        "bot_session_profit": None,
+    }
+    arr = _load_ux_sessions()
+    arr.append(rec)
+    if len(arr) > 3000:
+        arr = arr[-2500:]
+    _save_ux_sessions(arr)
+    S["_ux_session_id"] = rec["id"]
+
+
+def _ux_session_close(S: dict) -> None:
+    """عند تسجيل الخروج — رصيد النهاية بعد محاولة التحديث من المنصة."""
+    if not S or not S.get("logged_in"):
+        S and S.pop("_ux_session_id", None)
+        return
+    sid = S.get("_ux_session_id")
+    email = S.get("email") or ""
+    er = round(float(S.get("real_balance") or 0), 2)
+    ed = round(float(S.get("demo_balance") or 0), 2)
+    pl_bot = round(float(S.get("session_profit") or 0), 2)
+    cur = str(S.get("currency") or "USD")
+    arr = _load_ux_sessions()
+    now = datetime.now(timezone.utc).isoformat()
+    for rec in arr:
+        if not isinstance(rec, dict):
+            continue
+        if sid and rec.get("id") != sid:
+            continue
+        if not sid and (rec.get("email") != email or rec.get("ended_at") is not None):
+            continue
+        if rec.get("ended_at") is not None:
+            continue
+        sr = float(rec.get("start_real") or 0)
+        sd = float(rec.get("start_demo") or 0)
+        rec["ended_at"] = now
+        rec["end_real"] = er
+        rec["end_demo"] = ed
+        rec["currency"] = cur
+        rec["pl_real"] = round(er - sr, 2)
+        rec["pl_demo"] = round(ed - sd, 2)
+        rec["bot_session_profit"] = pl_bot
+        break
+    _save_ux_sessions(arr)
+    S.pop("_ux_session_id", None)
+
+
+async def _ux_refresh_balances_before_logout(S: dict) -> None:
+    if not S or not S.get("client") or not QX:
+        return
+    try:
+        r, d = await _get_balances(S["client"])
+        S["real_balance"] = round(float(r), 2)
+        S["demo_balance"] = round(float(d), 2)
+    except Exception:
+        pass
 
 
 def _resolve_user_email(raw: str):
@@ -2795,6 +2918,7 @@ async def _login_qx(email, password, S):
         S["needs_pin"] = False
         S["email"] = email
         S["login_error"] = ""
+        _ux_session_open(S)
         return {"ok":True,"client":client,"real":real,"demo":demo,"cur":cur}
     except Exception as e:
         log.error(traceback.format_exc())
@@ -3525,6 +3649,23 @@ async def admin_users(admin_token: str):
         })
     return {"users":result}
 
+@app.get("/api/admin/sessions")
+async def admin_sessions(admin_token: str, limit: int = 300):
+    if admin_token not in ADMIN_TOKENS:
+        raise HTTPException(403, "غير مصرح")
+    lim = max(10, min(int(limit or 300), 2000))
+    arr = _load_ux_sessions()
+    # الأحدث أولاً
+    try:
+        arr = sorted(
+            arr,
+            key=lambda x: (x.get("started_at") or "") if isinstance(x, dict) else "",
+            reverse=True,
+        )
+    except Exception:
+        arr = list(reversed(arr))
+    return {"sessions": arr[:lim]}
+
 @app.post("/api/admin/approve")
 async def admin_approve(req: ApproveReq):
     if req.admin_token not in ADMIN_TOKENS: raise HTTPException(403,"غير مصرح")
@@ -3561,6 +3702,12 @@ async def admin_delete(req: ApproveReq):
     if S:
         S["stop_event"].set()
         S["running"] = False
+        if S.get("logged_in"):
+            try:
+                run_async_for(req.email, _ux_refresh_balances_before_logout(S), 15)
+            except Exception:
+                pass
+            _ux_session_close(S)
         if S.get("client"):
             try: run_async_for(req.email, _close(S["client"]), 5)
             except: pass
@@ -3632,6 +3779,15 @@ async def login(req: LoginReq):
         SESSIONS[req.token] = new_session(email_key)
         S = SESSIONS[req.token]
     if QX:
+        if S.get("logged_in"):
+            _ux_finalize_open_for_email(
+                email_key,
+                float(S.get("real_balance") or 0),
+                float(S.get("demo_balance") or 0),
+                float(S.get("session_profit") or 0),
+                str(S.get("currency") or "USD"),
+            )
+            S.pop("_ux_session_id", None)
         if S.get("client"):
             try:
                 run_async_for(email_key, _close(S["client"]), 5)
@@ -3705,9 +3861,20 @@ async def login(req: LoginReq):
         S["client"]=r["client"]; S["real_balance"]=r["real"]
         S["demo_balance"]=r["demo"]; S["currency"]=r.get("cur","USD")
     else:
+        if S.get("logged_in"):
+            _ux_finalize_open_for_email(
+                email_key,
+                float(S.get("real_balance") or 0),
+                float(S.get("demo_balance") or 0),
+                float(S.get("session_profit") or 0),
+                str(S.get("currency") or "USD"),
+            )
+            S.pop("_ux_session_id", None)
         S["real_balance"]=0.0; S["demo_balance"]=10_000.0; S["currency"]="USD"
     S["logged_in"]=True; S["needs_pin"]=False; S["email"]=email_key
     S["status_msg"] = ""
+    if not QX:
+        _ux_session_open(S)
     return {"success":True,"needs_pin":False,"email":email_key,
             "user_id":abs(hash(email_key))%90_000_000+10_000_000,
             "real_balance":S["real_balance"],"demo_balance":S["demo_balance"],
@@ -3722,6 +3889,8 @@ async def pin_ep(req: PinReq):
         raise HTTPException(400,"PIN قصير")
     if not QX:
         S["logged_in"]=True; S["needs_pin"]=False
+        if not S.get("_ux_session_id"):
+            _ux_session_open(S)
         return {"success":True,"email":S["email"],"user_id":12345678,
                 "real_balance":0.0,"demo_balance":10_000.0,"currency":"USD","sim_mode":True}
     get_pin_q(S["email"]).put(p)
@@ -3734,6 +3903,16 @@ async def logout(req: TokenReq):
     S = get_session(req.token)
     if S:
         if S.get("running"): S["stop_event"].set(); S["running"]=False
+        if S.get("logged_in"):
+            try:
+                run_async_for(
+                    S.get("email") or "_",
+                    _ux_refresh_balances_before_logout(S),
+                    22,
+                )
+            except Exception:
+                pass
+            _ux_session_close(S)
         if S.get("client"):
             try: run_async_for(S.get("email","_"), _close(S["client"]),5)
             except: pass

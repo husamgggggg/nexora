@@ -131,6 +131,28 @@ body::before{
 .dash-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
 .last-sync{font-size:.72rem;color:var(--muted);}
 
+/* Admin tabs */
+.adm-tabs{
+  display:flex;gap:8px;margin-bottom:20px;padding:6px;
+  background:rgba(6,10,16,.45);border:1px solid var(--border);border-radius:14px;width:fit-content;flex-wrap:wrap;
+}
+.adm-tab{
+  border:none;background:transparent;color:var(--tx2);font-family:var(--font);
+  font-weight:700;font-size:.82rem;padding:10px 20px;border-radius:10px;cursor:pointer;transition:all .18s;
+}
+.adm-tab:hover{color:var(--tx);background:rgba(255,255,255,.04);}
+.adm-tab.on{
+  color:var(--tx);background:linear-gradient(135deg,rgba(77,183,255,.18),rgba(34,197,139,.1));
+  border:1px solid rgba(77,183,255,.22);
+}
+.adm-pane.hidden{display:none!important;}
+table.sess-tbl{min-width:1040px;}
+.pill-open{background:rgba(77,183,255,.12);color:var(--accent);border:1px solid rgba(77,183,255,.28);}
+.pill-done{background:rgba(142,160,186,.1);color:var(--tx2);border:1px solid var(--border);}
+.pl-pos{color:var(--ok);}
+.pl-neg{color:var(--bad);}
+.pl-zero{color:var(--muted);}
+
 /* KPI */
 .kpi-grid{
   display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:26px;
@@ -277,7 +299,12 @@ tbody tr:last-child td{border-bottom:none;}
     <div class="kpi k-rejected"><div class="kpi-ic">✕</div><div class="kpi-val r" id="sRejected">0</div><div class="kpi-lab">مرفوضون</div></div>
   </div>
 
-  <section class="panel">
+  <div class="adm-tabs" role="tablist">
+    <button type="button" class="adm-tab on" data-tab="users" role="tab" aria-selected="true" onclick="setAdminTab('users')">المشتركون</button>
+    <button type="button" class="adm-tab" data-tab="sessions" role="tab" aria-selected="false" onclick="setAdminTab('sessions')">جلسات الدخول</button>
+  </div>
+
+  <section class="panel adm-pane" id="paneUsers">
     <div class="panel-hd">
       <div>
         <h2>المشتركون</h2>
@@ -307,6 +334,38 @@ tbody tr:last-child td{border-bottom:none;}
       </table>
     </div>
   </section>
+
+  <section class="panel adm-pane hidden" id="paneSessions">
+    <div class="panel-hd">
+      <div>
+        <h2>جلسات الدخول</h2>
+        <p>رصيد البداية والنهاية (تجريبي / حقيقي) وفرق الرصيد وربح/خسارة البوت عند إغلاق الجلسة</p>
+      </div>
+      <div class="panel-tools">
+        <button type="button" class="btn btn-ghost btn-xs" onclick="loadSessions(true)">تحديث</button>
+      </div>
+    </div>
+    <div class="tbl-scroll">
+      <table class="sess-tbl">
+        <thead>
+          <tr>
+            <th>البريد</th>
+            <th>بدء الجلسة</th>
+            <th>انتهاء</th>
+            <th>حالة</th>
+            <th>تجريبي: قبل ← بعد</th>
+            <th>حقيقي: قبل ← بعد</th>
+            <th>Δ تجريبي</th>
+            <th>Δ حقيقي</th>
+            <th>ربح البوت</th>
+          </tr>
+        </thead>
+        <tbody id="sessionsTable">
+          <tr class="empty-row"><td colspan="9">اختر التبويب أو اضغط تحديث</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 </div>
 </div>
 
@@ -331,14 +390,110 @@ tbody tr:last-child td{border-bottom:none;}
 let AT = '';
 let pendingAction = null;
 let _adminPollId = null;
+let admTab = 'users';
 
 function escHtml(s){
   return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function setAdminTab(t){
+  admTab = t;
+  document.querySelectorAll('.adm-tab').forEach(b=>{
+    const on = b.dataset.tab === t;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  document.getElementById('paneUsers').classList.toggle('hidden', t !== 'users');
+  document.getElementById('paneSessions').classList.toggle('hidden', t !== 'sessions');
+  if(t === 'sessions') loadSessions(true);
+}
+
+function fmtSessDt(iso){
+  if(!iso) return '—';
+  try{
+    const d = new Date(iso);
+    if(isNaN(d.getTime())) return escHtml(String(iso).slice(0, 19));
+    return escHtml(d.toLocaleString('ar', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }));
+  }catch(_){ return '—'; }
+}
+
+function fmtBal(n){
+  if(n === null || n === undefined || n === '') return '—';
+  const x = Number(n);
+  if(Number.isNaN(x)) return '—';
+  return escHtml(x.toFixed(2));
+}
+
+function plCell(v){
+  if(v === null || v === undefined) return '<span class="pl-zero">—</span>';
+  const x = Number(v);
+  if(Number.isNaN(x)) return '<span class="pl-zero">—</span>';
+  const cls = x > 0 ? 'pl-pos' : x < 0 ? 'pl-neg' : 'pl-zero';
+  const s = (x >= 0 ? '+' : '') + x.toFixed(2);
+  return `<span class="${cls}">${escHtml(s)}</span>`;
+}
+
+async function loadSessions(manual){
+  if(!AT) return;
+  let r;
+  try{
+    r = await fetch('/api/admin/sessions?admin_token='+encodeURIComponent(AT)+'&limit=500');
+  }catch(_){ return; }
+  if(r.status === 403){
+    toast('انتهت صلاحية الجلسة — سجّل الدخول من جديد', 'er');
+    adminLogout();
+    return;
+  }
+  const d = await r.json().catch(()=>({}));
+  const list = d.sessions;
+  const tb = document.getElementById('sessionsTable');
+  if(!Array.isArray(list)){
+    tb.innerHTML = '<tr class="empty-row"><td colspan="9">تعذّر تحميل الجلسات</td></tr>';
+    return;
+  }
+  if(manual){
+    const elSync = document.getElementById('lastSync');
+    if(elSync){
+      const t = new Date().toLocaleTimeString('ar',{ hour:'2-digit', minute:'2-digit', second:'2-digit' });
+      elSync.textContent = 'تم التحديث — ' + t;
+    }
+  }
+  if(!list.length){
+    tb.innerHTML = '<tr class="empty-row"><td colspan="9">لا توجد جلسات مسجّلة بعد (تُسجّل عند كل تسجيل دخول ناجح)</td></tr>';
+    return;
+  }
+  const curUnit = (x) => ` <span style="color:var(--muted);font-size:.72rem">${escHtml(x.currency||'USD')}</span>`;
+  tb.innerHTML = list.map(x=>{
+    if(!x || typeof x !== 'object') return '';
+    const open = !x.ended_at;
+    const st = open
+      ? '<span class="pill pill-open">نشطة</span>'
+      : '<span class="pill pill-done">مغلقة</span>';
+    const demoEnd = open ? '<span class="state-off">مفتوحة</span>' : fmtBal(x.end_demo);
+    const realEnd = open ? '<span class="state-off">مفتوحة</span>' : fmtBal(x.end_real);
+    const dPl = open ? '<span class="pl-zero">—</span>' : plCell(x.pl_demo);
+    const rPl = open ? '<span class="pl-zero">—</span>' : plCell(x.pl_real);
+    const bPl = open ? '<span class="pl-zero">—</span>' : plCell(x.bot_session_profit);
+    return `<tr>
+      <td class="cell-email">${escHtml(x.email||'')}</td>
+      <td class="cell-date">${fmtSessDt(x.started_at)}</td>
+      <td class="cell-date">${open ? '<span class="state-off">—</span>' : fmtSessDt(x.ended_at)}</td>
+      <td>${st}</td>
+      <td class="cell-num">${fmtBal(x.start_demo)} → ${demoEnd}${curUnit(x)}</td>
+      <td class="cell-num">${fmtBal(x.start_real)} → ${realEnd}${curUnit(x)}</td>
+      <td class="cell-num">${dPl}</td>
+      <td class="cell-num">${rPl}</td>
+      <td class="cell-num">${bPl}</td>
+    </tr>`;
+  }).join('');
+}
+
 function _startAdminPoll(){
   if(_adminPollId != null) clearInterval(_adminPollId);
-  _adminPollId = setInterval(()=>loadUsers(false), 5000);
+  _adminPollId = setInterval(()=>{
+    loadUsers(false);
+    if(admTab === 'sessions') loadSessions(false);
+  }, 5000);
 }
 
 async function api(path, method='GET', body=null){
