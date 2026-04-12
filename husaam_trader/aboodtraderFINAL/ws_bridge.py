@@ -11,6 +11,7 @@
 import argparse
 import asyncio
 import base64
+import logging
 import os
 import traceback
 import urllib.parse
@@ -33,6 +34,20 @@ except ImportError:  # pragma: no cover
     Stealth = None  # type: ignore[misc, assignment]
 
 _SESSION_END = object()
+
+
+class _DropEmptyWsHandshakeLog(logging.Filter):
+    """اتصال TCP بلا سطر HTTP (مثلاً فحص منفذ) يولّد ضجيجاً في لوج websockets."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage().lower()
+        if "opening handshake failed" in msg:
+            return False
+        if "did not receive a valid http" in msg:
+            return False
+        if "connection closed while reading http request line" in msg:
+            return False
+        return True
 
 
 def _playwright_entry():
@@ -203,15 +218,40 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
             nav_timeout = 90000
         nav_timeout = max(5000, min(nav_timeout, 300000))
         if skip_nav or not nav_url:
-            await page.goto("about:blank")
+            try:
+                await page.goto("about:blank", wait_until="commit", timeout=8000)
+            except Exception:
+                pass
             print(f"[Bridge] session={session_id} page: about:blank", flush=True)
         else:
             try:
                 await page.goto(nav_url, wait_until="commit", timeout=nav_timeout)
                 print(f"[Bridge] session={session_id} page: committed {nav_url}", flush=True)
             except Exception as nav_err:
-                print(f"[Bridge] session={session_id} page.goto failed ({nav_err}) — about:blank", flush=True)
-                await page.goto("about:blank")
+                print(
+                    f"[Bridge] session={session_id} page.goto failed ({nav_err}) — recover tab",
+                    flush=True,
+                )
+                recovered = False
+                try:
+                    await page.goto("about:blank", wait_until="commit", timeout=8000)
+                    recovered = True
+                except Exception:
+                    pass
+                if not recovered:
+                    try:
+                        await page.close()
+                    except Exception:
+                        pass
+                    page = await context.new_page()
+                    try:
+                        await page.goto("about:blank", wait_until="commit", timeout=8000)
+                    except Exception:
+                        pass
+                    print(
+                        f"[Bridge] session={session_id} page: new tab after chrome-error / tunnel fail",
+                        flush=True,
+                    )
 
         async def emit_to_python(payload):
             if session_done.is_set():
@@ -491,6 +531,8 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
 
 
 async def main():
+    for _lg in ("websockets.server", "websockets.asyncio.server"):
+        logging.getLogger(_lg).addFilter(_DropEmptyWsHandshakeLog())
     parser = argparse.ArgumentParser()
     parser.add_argument("--listen-host", default="127.0.0.1")
     parser.add_argument("--listen-port", type=int, default=8765)
@@ -509,7 +551,8 @@ async def main():
             await bridge_handler(ws, args.target_url, proxy_url=args.proxy_url)
         except Exception as e:
             print(f"[Bridge] handler crash: {e}")
-            raise
+            print(traceback.format_exc())
+            return
 
     async with websockets.serve(handler, args.listen_host, args.listen_port):
         await asyncio.Future()

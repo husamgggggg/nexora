@@ -512,6 +512,30 @@ def _wait_port_open(host: str, port: int, timeout_sec: float = 8.0) -> bool:
     return False
 
 
+def _local_tcp_port_listening(port: int) -> bool:
+    """LISTEN على 127.0.0.1 دون TCP connect — يتجنب InvalidMessage على خادم websockets."""
+    if sys.platform == "win32":
+        return False
+    try:
+        out = subprocess.check_output(["ss", "-ltn"], text=True, timeout=2, stderr=subprocess.DEVNULL)
+    except Exception:
+        return False
+    pat = re.compile(rf":{int(port)}\s")
+    for line in out.splitlines():
+        if "LISTEN" in line and pat.search(line):
+            return True
+    return False
+
+
+def _wait_local_port_listening(port: int, timeout_sec: float = 8.0) -> bool:
+    end = time.time() + timeout_sec
+    while time.time() < end:
+        if _local_tcp_port_listening(port):
+            return True
+        time.sleep(0.15)
+    return False
+
+
 def _ensure_playwright_bridge(target_ws_url: str):
     global _PW_BRIDGE_PROC, _PW_BRIDGE_PORT
     if not target_ws_url:
@@ -563,7 +587,13 @@ def _ensure_playwright_bridge(target_ws_url: str):
         _PW_BRIDGE_PROC = None
         _PW_BRIDGE_PORT = None
         return None
-    if not _wait_port_open("127.0.0.1", port, 10.0):
+    if sys.platform != "win32":
+        bridge_ready = _wait_local_port_listening(port, 10.0) or _wait_port_open(
+            "127.0.0.1", port, 3.0
+        )
+    else:
+        bridge_ready = _wait_port_open("127.0.0.1", port, 10.0)
+    if not bridge_ready:
         log.warning("Playwright bridge لم يبدأ على المنفذ %s", port)
         try:
             _PW_BRIDGE_PROC.kill()
