@@ -127,16 +127,10 @@ def _install_pyquotex_ws_candle_asset_fix():
             hl = len(hist) if hist is not None else 0
         except Exception:
             hl = 0
-        api = getattr(self, "api", None)
-        if api is not None:
-            d = getattr(api, "_nexora_ws_last", None)
-            if not isinstance(d, dict):
-                d = {}
-                api._nexora_ws_last = d
-            d["last_msg_asset"] = ma
-            d["last_current_asset"] = ca
-            d["last_history_len"] = hl
-            d["last_ts"] = time.time()
+        _HUSAAM_WS_LAST["last_msg_asset"] = ma
+        _HUSAAM_WS_LAST["last_current_asset"] = ca
+        _HUSAAM_WS_LAST["last_history_len"] = hl
+        _HUSAAM_WS_LAST["last_ts"] = time.time()
         if not _ws_history_asset_matches(self.api, ma, ca):
             log.debug(
                 "WS history: asset غير متطابق (msg=%s current=%s) — قد يمنع pyquotex التخزين",
@@ -154,10 +148,7 @@ def _install_pyquotex_ws_candle_asset_fix():
                 self.api.candle_v2_data[ma] = message
             patched = True
         if patched:
-            if api is not None:
-                d = getattr(api, "_nexora_ws_last", None)
-                if isinstance(d, dict):
-                    d["patched_fill"] = True
+            _HUSAAM_WS_LAST["patched_fill"] = True
             log.info(
                 "🔧 WS: عُدّل تخزين شموع history (msg_asset=%s current=%s hist_len=%s v2=%s)",
                 ma,
@@ -166,10 +157,7 @@ def _install_pyquotex_ws_candle_asset_fix():
                 bool(message.get("candles")),
             )
         else:
-            if api is not None:
-                d = getattr(api, "_nexora_ws_last", None)
-                if isinstance(d, dict):
-                    d["patched_fill"] = False
+            _HUSAAM_WS_LAST["patched_fill"] = False
 
     _on_message._husaam_ws_patch = True
     WebsocketClient.on_message = _on_message
@@ -473,28 +461,19 @@ def establish_websocket_with_stealth(proxy=None):
     return None
 
 
-def _stop_playwright_bridge_for_api(api) -> None:
-    """
-    إيقاف جسر Playwright المرتبط بهذه جلسة QuotexAPI فقط.
-    عند وجود عدة حسابات، إيقاف جسر عام كان يقتل اتصال الحساب الآخر (Connection is already closed).
-    """
-    if api is None:
+_PW_BRIDGE_PROC = None
+_PW_BRIDGE_PORT = None
+
+
+def _stop_playwright_bridge():
+    """إيقاف عملية الجسر القديمة — كل login/WS جديد يجب أن يستخدم منفذاً وجلسة جديدة."""
+    global _PW_BRIDGE_PROC, _PW_BRIDGE_PORT
+    proc = _PW_BRIDGE_PROC
+    _PW_BRIDGE_PROC = None
+    _PW_BRIDGE_PORT = None
+    if proc is None or proc.poll() is not None:
         return
-    proc = getattr(api, "_nexora_pw_bridge_proc", None)
-    port = getattr(api, "_nexora_pw_bridge_port", None)
-    try:
-        api._nexora_pw_bridge_proc = None
-        api._nexora_pw_bridge_port = None
-    except Exception:
-        pass
-    if proc is None:
-        return
-    try:
-        if proc.poll() is not None:
-            return
-    except Exception:
-        return
-    log.info("Playwright bridge: إيقاف جسر جلسة هذا الحساب (منفذ=%s)", port)
+    log.info("Playwright bridge: إيقاف جلسة الجسر السابقة قبل إنشاء جلسة جديدة")
     try:
         proc.terminate()
         proc.wait(timeout=8)
@@ -557,18 +536,16 @@ def _wait_local_port_listening(port: int, timeout_sec: float = 8.0) -> bool:
     return False
 
 
-def _ensure_playwright_bridge(target_ws_url: str, api_owner):
-    """
-    جسر محلي لكل جلسة pyquotex (api_owner). لا تُوقف جسور الحسابات الأخرى.
-    """
+def _ensure_playwright_bridge(target_ws_url: str):
+    global _PW_BRIDGE_PROC, _PW_BRIDGE_PORT
     if not target_ws_url:
         return None
     bridge_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ws_bridge.py")
     if not os.path.isfile(bridge_file):
         log.warning("Playwright bridge file غير موجود: %s", bridge_file)
         return None
-    # إيقاف جسر *هذه* الجلسة فقط قبل منفذ جديد (إعادة اتصال WS لنفس الحساب)
-    _stop_playwright_bridge_for_api(api_owner)
+    # لا إعادة استخدام منفذ/عملية قديمة: upstream قد يواصل إعادة الاتصال بينما pyquotex على جلسة محلية جديدة
+    _stop_playwright_bridge()
 
     port = _pick_free_port()
     # systemd غالباً لا يضع `python` في PATH — بدون الجسر يبقى WS مباشر وCloudflare يرد 403 challenge.
@@ -598,21 +575,17 @@ def _ensure_playwright_bridge(target_ws_url: str, api_owner):
         os.makedirs(logs_dir, exist_ok=True)
         bridge_log_path = os.path.join(logs_dir, "ws_bridge.log")
         bridge_log = open(bridge_log_path, "a", encoding="utf-8")
-        proc = subprocess.Popen(
+        _PW_BRIDGE_PROC = subprocess.Popen(
             cmd,
             cwd=os.path.dirname(bridge_file),
             stdout=bridge_log,
             stderr=bridge_log,
         )
-        api_owner._nexora_pw_bridge_proc = proc
-        api_owner._nexora_pw_bridge_port = port
+        _PW_BRIDGE_PORT = port
     except Exception as e:
         log.warning("تعذر تشغيل Playwright bridge: %s", e)
-        try:
-            api_owner._nexora_pw_bridge_proc = None
-            api_owner._nexora_pw_bridge_port = None
-        except Exception:
-            pass
+        _PW_BRIDGE_PROC = None
+        _PW_BRIDGE_PORT = None
         return None
     if sys.platform != "win32":
         bridge_ready = _wait_local_port_listening(port, 10.0) or _wait_port_open(
@@ -623,16 +596,13 @@ def _ensure_playwright_bridge(target_ws_url: str, api_owner):
     if not bridge_ready:
         log.warning("Playwright bridge لم يبدأ على المنفذ %s", port)
         try:
-            proc.kill()
+            _PW_BRIDGE_PROC.kill()
         except Exception:
             pass
-        try:
-            api_owner._nexora_pw_bridge_proc = None
-            api_owner._nexora_pw_bridge_port = None
-        except Exception:
-            pass
+        _PW_BRIDGE_PROC = None
+        _PW_BRIDGE_PORT = None
         return None
-    log.info("✅ Playwright WS bridge started: ws://127.0.0.1:%s (جلسة مستقلة لهذا الحساب)", port)
+    log.info("✅ Playwright WS bridge started: ws://127.0.0.1:%s", port)
     return f"ws://127.0.0.1:{port}"
 
 
@@ -676,14 +646,12 @@ def _install_pyquotex_ws_proxy_patch(proxies):
         self.websocket_client = _qx_api_mod.WebsocketClient(self)
         use_bridge = os.getenv("QUOTEX_USE_PLAYWRIGHT_BRIDGE", "").strip().lower() in ("1", "true", "yes", "on")
         bridge_ws_url = None
-        bridge_port = None
         if use_bridge:
             try:
                 target_ws_url = getattr(self.websocket, "url", "") or ""
-                bridge_ws_url = _ensure_playwright_bridge(target_ws_url, self)
+                bridge_ws_url = _ensure_playwright_bridge(target_ws_url)
                 if bridge_ws_url:
                     self.websocket.url = bridge_ws_url
-                    bridge_port = getattr(self, "_nexora_pw_bridge_port", None)
                     log.info("🔁 WebSocket redirected via Playwright bridge: %s", bridge_ws_url)
             except Exception as e:
                 log.warning("Playwright bridge redirect failed: %s", e)
@@ -710,11 +678,7 @@ def _install_pyquotex_ws_proxy_patch(proxies):
             "ping_timeout": 20,
             "ping_payload": "2",
             "origin": self.https_url if not bridge_ws_url else "http://127.0.0.1",
-            "host": (
-                f"ws2.{self.host}"
-                if not bridge_ws_url
-                else f"127.0.0.1:{int(bridge_port or getattr(self, '_nexora_pw_bridge_port', 0) or 0)}"
-            ),
+            "host": (f"ws2.{self.host}" if not bridge_ws_url else f"127.0.0.1:{_PW_BRIDGE_PORT}"),
             "sslopt": sslopt,
         }
 
@@ -1836,15 +1800,6 @@ def _fallback_direction_from_candles(candles) -> tuple:
 _price_buffers: dict = {}
 # احتفاظ أطول لبناء شموع 5ث (35 شمعة ≈ 175ث جدارياً على الأقل)
 _PRICE_BUFFER_RETENTION_SEC = 1800
-
-
-def _session_price_key(email: str, asset: str) -> tuple:
-    """مفتاح تخزين تيكات المراقبة لكل حساب وزوج — لا دمج بين المشتركين."""
-    return (str(email or "").strip().lower() or "_", asset)
-
-
-def _session_ema_cache_key(email: str, asset: str) -> tuple:
-    return (str(email or "").strip().lower() or "_", asset)
 # تدفئة: تيكات للمراقبة/الواجهة فقط — لـ EMA10 لا تُستخدم في الإشارة
 _WARMUP_COLLECT_SEC = 180
 _WARMUP_COLLECT_SEC_EMA10 = 25
@@ -1912,15 +1867,14 @@ async def _start_price_stream(client, asset):
         log.warning("start_candles_stream(%s): %s", asset, e)
 
 
-def _append_price_tick(email: str, asset: str, p: float) -> None:
+def _append_price_tick(asset: str, p: float) -> None:
     if p <= 0:
         return
-    key = _session_price_key(email, asset)
-    if key not in _price_buffers:
-        _price_buffers[key] = []
-    _price_buffers[key].append({"price": p, "time": time.time()})
+    if asset not in _price_buffers:
+        _price_buffers[asset] = []
+    _price_buffers[asset].append({"price": p, "time": time.time()})
     cutoff = time.time() - _PRICE_BUFFER_RETENTION_SEC
-    _price_buffers[key] = [x for x in _price_buffers[key] if x["time"] > cutoff]
+    _price_buffers[asset] = [x for x in _price_buffers[asset] if x["time"] > cutoff]
 
 
 def _price_from_realtime_candles_tuple(client) -> float:
@@ -1937,7 +1891,7 @@ def _price_from_realtime_candles_tuple(client) -> float:
     return 0.0
 
 
-async def _collect_price_async(client, asset, email: str = "") -> float:
+async def _collect_price_async(client, asset) -> float:
     """يقرأ التيك من أي مفتاح مطابق (رقم أو رمز) مع انتظار قصير بين المحاولات."""
     keys = _quotex_tick_keys(client, asset)
     try:
@@ -1949,11 +1903,11 @@ async def _collect_price_async(client, asset, email: str = "") -> float:
                     continue
                 p = _parse_rt_price(price)
                 if p > 0:
-                    _append_price_tick(email, asset, p)
+                    _append_price_tick(asset, p)
                     return p
             p2 = _price_from_realtime_candles_tuple(client)
             if p2 > 0:
-                _append_price_tick(email, asset, p2)
+                _append_price_tick(asset, p2)
                 return p2
             await asyncio.sleep(0.2)
     except Exception:
@@ -1964,18 +1918,17 @@ def _collect_price(client, asset, email: str = "") -> float:
     """جلب سعر حي — يجب تشغيله على نفس event loop الخاصة بجلسة Quotex (connect)."""
     try:
         if email and QX:
-            p = run_async_for(email, _collect_price_async(client, asset, email), timeout=12)
+            p = run_async_for(email, _collect_price_async(client, asset), timeout=12)
         else:
-            p = run_async(_collect_price_async(client, asset, email), timeout=12)
+            p = run_async(_collect_price_async(client, asset), timeout=12)
         return p or 0
     except Exception:
         return 0
 
-def _build_candles(email: str, asset, candle_secs=5) -> list:
-    key = _session_price_key(email, asset)
-    if key not in _price_buffers or len(_price_buffers[key]) < 10:
+def _build_candles(asset, candle_secs=5) -> list:
+    if asset not in _price_buffers or len(_price_buffers[asset]) < 10:
         return []
-    prices = sorted(_price_buffers[key], key=lambda x: x["time"])
+    prices = sorted(_price_buffers[asset], key=lambda x: x["time"])
     candles, buf, t0 = [], [], prices[0]["time"] - (prices[0]["time"] % candle_secs)
     for e in prices:
         ct = e["time"] - (e["time"] % candle_secs)
@@ -1990,8 +1943,8 @@ def _build_candles(email: str, asset, candle_secs=5) -> list:
     log.debug("📊 %s شمعة من %s سعر", len(candles), len(prices))
     return candles
 
-_husaam_api_candle_cache: dict = {}  # (email, asset) -> {t, candles, source: "quotex"}
-_husaam_ema10_analysis_log_ts: dict = {}  # (email, asset) -> وقت آخر log تفصيلي (تخفيف تكرار الكاش)
+_husaam_api_candle_cache: dict = {}  # asset -> {t, candles, source: "quotex"}
+_husaam_ema10_analysis_log_ts: dict = {}  # asset -> وقت آخر log تفصيلي (تخفيف تكرار الكاش)
 
 
 def _normalize_quotex_candle_row(c):
@@ -2114,13 +2067,7 @@ async def _fetch_quotex_minute_once(client, asset: str) -> list:
     except Exception:
         pass
 
-    _api0 = getattr(client, "api", None)
-    if _api0 is not None:
-        _d0 = getattr(_api0, "_nexora_ws_last", None)
-        if not isinstance(_d0, dict):
-            _d0 = {}
-            _api0._nexora_ws_last = _d0
-        _d0["patched_fill"] = False
+    _HUSAAM_WS_LAST["patched_fill"] = False
     await _quotex_prepare_candles_session(client, asset, period)
     stream_ok = getattr(getattr(client, "api", None), "current_asset", None) == asset
     cur = getattr(getattr(client, "api", None), "current_asset", None)
@@ -2159,9 +2106,7 @@ async def _fetch_quotex_minute_once(client, asset: str) -> list:
         )
     if len(best) >= _HUSAAM_EMA10_ANALYSIS_BARS:
         best = _sort_candles_by_time(best)
-        _log_husaam_fetch_diag(
-            asset, cur, period, need_slots, off, best, stream_ok, False, False, client=client
-        )
+        _log_husaam_fetch_diag(asset, cur, period, need_slots, off, best, stream_ok, False, False)
         return best
 
     try:
@@ -2201,9 +2146,7 @@ async def _fetch_quotex_minute_once(client, asset: str) -> list:
 
     best = _sort_candles_by_time(best)
     hist_sent = True
-    _log_husaam_fetch_diag(
-        asset, cur, period, need_slots, off, best, stream_ok, hist_sent, True, client=client
-    )
+    _log_husaam_fetch_diag(asset, cur, period, need_slots, off, best, stream_ok, hist_sent, True)
     return best
 
 
@@ -2217,7 +2160,6 @@ def _log_husaam_fetch_diag(
     stream_ok: bool,
     history_sent: bool,
     after_get_candles: bool,
-    client=None,
 ) -> None:
     n = len(best)
     first_ts = last_ts = None
@@ -2235,10 +2177,6 @@ def _log_husaam_fetch_diag(
     cleaned = len(prep)
     ok40 = cleaned >= _HUSAAM_EMA10_ANALYSIS_BARS
     ws = _HUSAAM_WS_LAST
-    if client is not None:
-        _api_d = getattr(getattr(client, "api", None), "_nexora_ws_last", None)
-        if isinstance(_api_d, dict):
-            ws = _api_d
     log.info(
         "📊 EMA10 pipeline | مطلوب=%s | current=%s | stream_ok=%s | history_sent=%s | "
         "after_ws_get_candles=%s | ws_last_hist_len=%s | ws_patched=%s | "
@@ -2281,10 +2219,9 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
     """يعيد (شموع للتحليل, مصدر). التحليل من آخر N شمعة 1m من Quotex بعد التنظيف — لا تيكات."""
     tgt = analysis_bars if analysis_bars is not None else _HUSAAM_EMA10_ANALYSIS_BARS
     if not QX or not client:
-        return _build_candles(email, asset, candle_secs=_HUSAAM_EMA10_CANDLE_SECS), "sim_tick_1m"
+        return _build_candles(asset, candle_secs=_HUSAAM_EMA10_CANDLE_SECS), "sim_tick_1m"
     now = time.time()
-    _ck = _session_ema_cache_key(email, asset)
-    ce = _husaam_api_candle_cache.get(_ck)
+    ce = _husaam_api_candle_cache.get(asset)
 
     def _finalize(raw: list, label: str) -> tuple:
         prep = _prepare_husaam_ema10_candles_for_analysis(raw, max_bars=tgt)
@@ -2295,9 +2232,7 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
         t0 = out[0].get("time")
         t1 = out[-1].get("time")
         _tl = time.time()
-        _throttle = label == "quotex_1m_cache" and (
-            _tl - _husaam_ema10_analysis_log_ts.get(_ck, 0) < 30
-        )
+        _throttle = label == "quotex_1m_cache" and (_tl - _husaam_ema10_analysis_log_ts.get(asset, 0) < 30)
         if not _throttle:
             log.info(
                 "📊 EMA10 analysis: asset=%s current_asset=%s period=60 need=%s got=%s first_ts=%s last_ts=%s src=%s",
@@ -2309,7 +2244,7 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
                 int(t1) if t1 is not None else None,
                 label,
             )
-            _husaam_ema10_analysis_log_ts[_ck] = _tl
+            _husaam_ema10_analysis_log_ts[asset] = _tl
         return out, label
 
     if (
@@ -2330,7 +2265,7 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
         lst = []
 
     if lst:
-        _husaam_api_candle_cache[_ck] = {"t": now, "candles": lst, "source": "quotex"}
+        _husaam_api_candle_cache[asset] = {"t": now, "candles": lst, "source": "quotex"}
         got, lab = _finalize(lst, "quotex_1m")
         if got:
             return got, lab
@@ -2534,14 +2469,8 @@ async def _check_win(client, tid):
 
 async def _close(client):
     try:
-        if client:
-            api = getattr(client, "api", None)
-            try:
-                await client.close()
-            finally:
-                _stop_playwright_bridge_for_api(api)
-    except Exception:
-        pass
+        if client: await client.close()
+    except: pass
 
 # ══════════════════════════════════════════════════════════════════════════════
 # BOT WORKER
@@ -2627,9 +2556,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
         stop.wait(timeout=1)
     if _should_stop(): return
 
-    _tick_total = sum(
-        len(_price_buffers.get(_session_price_key(S["email"], a), [])) for a in all_assets
-    )
+    _tick_total = sum(len(_price_buffers.get(a, [])) for a in all_assets)
     log.info("✅ مراقبة: %s تيك محفوظ — بدء الحلقة (%s)", _tick_total, req.strategy)
     S["status_msg"] = ""
 
