@@ -3417,9 +3417,15 @@ if __name__ == "__main__":
     log.info(f"📦 pydantic : v{pydantic.VERSION}")
     if os.getenv("TELEGRAM_BOT_TOKEN", "").strip() and os.getenv("TELEGRAM_CHANNEL_ID", "").strip():
         log.info("📱 تيليجرام: إشعارات طلبات الانضمام → القناة مفعّلة")
-    uvicorn.run(
-        app,
+    _uv_kw = dict(
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "8000")),
         access_log=False,
     )
+    _cert = (os.getenv("UVICORN_SSL_CERTFILE") or "").strip()
+    _key = (os.getenv("UVICORN_SSL_KEYFILE") or "").strip()
+    if _cert and _key:
+        _uv_kw["ssl_certfile"] = _cert
+        _uv_kw["ssl_keyfile"] = _key
+        log.info("🔒 HTTPS: uvicorn SSL | cert=%s key=%s", _cert, _key)
+    uvicorn.run(app, **_uv_kw)
