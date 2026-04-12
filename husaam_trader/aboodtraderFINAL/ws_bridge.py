@@ -307,6 +307,9 @@ _BRIDGE_RUNTIME_JS = r"""
   window.__targetPending = window.__targetPending || [];
   window.__bridgeTargetUrl = window.__bridgeTargetUrl || "";
   window.__bridgeManualFallbackTimer = null;
+  window.__bridgePageWaitTimer = null;
+  window.__bridgeSawPageSocket = false;
+  window.__bridgeLastCaptureSource = window.__bridgeLastCaptureSource || "";
 
   const emit = (payload) => {
     try {
@@ -335,6 +338,14 @@ _BRIDGE_RUNTIME_JS = r"""
     if (!ws || ws.__bridgeObserved) return ws;
     ws.__bridgeObserved = true;
     window.__targetWs = ws;
+    window.__bridgeLastCaptureSource = source;
+    if (source === "page") {
+      window.__bridgeSawPageSocket = true;
+      if (window.__bridgeManualFallbackTimer) {
+        clearTimeout(window.__bridgeManualFallbackTimer);
+        window.__bridgeManualFallbackTimer = null;
+      }
+    }
     try {
       ws.binaryType = "arraybuffer";
     } catch (_) {}
@@ -384,7 +395,17 @@ _BRIDGE_RUNTIME_JS = r"""
   const looksLikeBridgeTarget = (urlText) => {
     const s = String(urlText || "");
     if (!s || (!s.startsWith("ws://") && !s.startsWith("wss://"))) return false;
-    if (window.__bridgeTargetUrl && s === window.__bridgeTargetUrl) return true;
+    if (window.__bridgeTargetUrl) {
+      try {
+        const a = new URL(s);
+        const b = new URL(window.__bridgeTargetUrl);
+        if (a.hostname === b.hostname) {
+          if (a.pathname === b.pathname) return true;
+          if (a.pathname.includes("/socket.io/") && b.pathname.includes("/socket.io/")) return true;
+        }
+      } catch (_) {}
+      if (s === window.__bridgeTargetUrl) return true;
+    }
     return s.includes("qxbroker.com") || s.includes("/socket.io/");
   };
 
@@ -394,6 +415,8 @@ _BRIDGE_RUNTIME_JS = r"""
       const urlText = String(url || "");
       if (looksLikeBridgeTarget(urlText)) {
         bridgeifySocket(this, "page", urlText);
+      } else if (urlText.startsWith("ws://") || urlText.startsWith("wss://")) {
+        emit({ k: "t", d: `__WS_SKIP__|url=${urlText}` });
       }
     }
   }
@@ -430,19 +453,32 @@ _BRIDGE_RUNTIME_JS = r"""
     return ws;
   };
 
-  window.__bridgeStart = (targetUrl, fallbackDelayMs) => {
+  window.__bridgeStart = (targetUrl, pageSocketWaitMs, fallbackDelayMs) => {
     window.__bridgeTargetUrl = String(targetUrl || "");
+    window.__bridgeSawPageSocket = false;
+    const pageWait = Math.max(0, Number(pageSocketWaitMs || 0));
     const delay = Math.max(0, Number(fallbackDelayMs || 0));
+    if (window.__bridgePageWaitTimer) {
+      clearTimeout(window.__bridgePageWaitTimer);
+      window.__bridgePageWaitTimer = null;
+    }
     if (window.__bridgeManualFallbackTimer) {
       clearTimeout(window.__bridgeManualFallbackTimer);
       window.__bridgeManualFallbackTimer = null;
+    }
+    if (pageWait > 0) {
+      window.__bridgePageWaitTimer = setTimeout(() => {
+        if (!window.__bridgeSawPageSocket) {
+          emit({ k: "t", d: `__WS_PAGE_WAIT_TIMEOUT__|wait_ms=${pageWait}` });
+        }
+      }, pageWait);
     }
     if (delay > 0) {
       window.__bridgeManualFallbackTimer = setTimeout(() => {
         const ws = window.__targetWs;
         const readyState = ws ? ws.readyState : -1;
-        if (!ws || readyState === NativeWebSocket.CLOSED) {
-          emit({ k: "t", d: `__WS_MANUAL_FALLBACK__|delay_ms=${delay}` });
+        if ((!ws || readyState === NativeWebSocket.CLOSED) && !window.__bridgeSawPageSocket) {
+          emit({ k: "t", d: `__WS_MANUAL_FALLBACK__|delay_ms=${delay}|page_seen=false` });
           window.__connectTarget(window.__bridgeTargetUrl);
         }
       }, delay);
@@ -565,9 +601,20 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
         except ValueError:
             manual_fallback_delay_ms = 7000
         manual_fallback_delay_ms = max(0, min(manual_fallback_delay_ms, 30000))
+        try:
+            page_socket_wait_ms = int(
+                os.environ.get("QUOTEX_BRIDGE_PAGE_SOCKET_WAIT_MS", "12000") or 12000
+            )
+        except ValueError:
+            page_socket_wait_ms = 12000
+        page_socket_wait_ms = max(0, min(page_socket_wait_ms, 60000))
         await page.evaluate(
-            "(args) => window.__bridgeStart(args.targetUrl, args.fallbackDelayMs)",
-            {"targetUrl": target_url, "fallbackDelayMs": manual_fallback_delay_ms},
+            "(args) => window.__bridgeStart(args.targetUrl, args.pageSocketWaitMs, args.fallbackDelayMs)",
+            {
+                "targetUrl": target_url,
+                "pageSocketWaitMs": page_socket_wait_ms,
+                "fallbackDelayMs": manual_fallback_delay_ms,
+            },
         )
         try:
             upstream_open_timeout = float(
@@ -612,6 +659,12 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                 if kind == "str":
                     if data.startswith("__WS_CAPTURE__"):
                         print(f"[Bridge] upstream Quotex WebSocket CAPTURE {data}", flush=True)
+                        continue
+                    if data.startswith("__WS_SKIP__"):
+                        print(f"[Bridge] upstream Quotex WebSocket SKIP {data}", flush=True)
+                        continue
+                    if data.startswith("__WS_PAGE_WAIT_TIMEOUT__"):
+                        print(f"[Bridge] upstream Quotex WebSocket PAGE_WAIT {data}", flush=True)
                         continue
                     if data.startswith("__WS_MANUAL_FALLBACK__"):
                         print(f"[Bridge] upstream Quotex WebSocket FALLBACK {data}", flush=True)
