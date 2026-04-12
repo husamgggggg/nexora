@@ -2079,6 +2079,58 @@ async def _ensure_quotex_assets(client):
         log.debug("get_all_assets: %s", e)
 
 
+def _quotex_instrument_row_tradable_open(row) -> bool:
+    """صف أداة pyquotex: معرّف غير فارغ (قابل للتداول) والعمود 14 = مفتوح بالمنصة."""
+    if not isinstance(row, (list, tuple)) or len(row) < 15:
+        return False
+    if str(row[0] or "").strip() == "":
+        return False
+    o = row[14]
+    if o is True or o == 1:
+        return True
+    if o is False or o == 0 or o is None:
+        return False
+    if isinstance(o, str):
+        return o.strip().lower() in ("1", "true", "yes", "open")
+    try:
+        return float(o) != 0.0
+    except (TypeError, ValueError):
+        return bool(o)
+
+
+async def _fetch_open_assets_for_ui(client):
+    """أزواج مفتوحة على Quotex فقط + نسب دفع (عمود 1M) إن وُجدت."""
+    await _ensure_quotex_assets(client)
+    if not hasattr(client, "get_instruments"):
+        return [], [], [], {}
+    instruments = await client.get_instruments()
+    if not instruments:
+        return [], [], [], {}
+    otc, live, merged = [], [], []
+    payouts = {}
+    seen = set()
+    for i in instruments:
+        if not _quotex_instrument_row_tradable_open(i):
+            continue
+        sym = str(i[1]).strip()
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        merged.append(sym)
+        if sym.endswith("_otc") or "_otc" in sym:
+            otc.append(sym)
+        else:
+            live.append(sym)
+        try:
+            payouts[sym] = int(round(float(i[-9])))
+        except (TypeError, ValueError, OverflowError, IndexError):
+            pass
+    otc.sort()
+    live.sort()
+    merged.sort()
+    return otc, live, merged, payouts
+
+
 async def _start_price_stream(client, asset):
     """يشترك في التيكات بدون انتظار start_realtime_price (حلقة لا نهائية في المكتبة + مهلة قصيرة كانت تُلغي الاشتراك)."""
     try:
@@ -3727,6 +3779,36 @@ async def stop_ep(req: TokenReq):
         S["status_msg"] = ""
         S["candle_source"] = ""
     return {"success":True}
+
+@app.get("/api/assets")
+async def api_assets(token: str = ""):
+    """قائمة الأزواج المفتوحة على Quotex للواجهة — لا يغيّر تسجيل الدخول."""
+    S = get_session(token)
+    if not S:
+        return {"success": False, "detail": "جلسة غير صالحة"}
+    if not S.get("logged_in"):
+        return {"success": False, "detail": "سجّل الدخول أولاً"}
+    if _is_session_sim_mode(S):
+        return {"success": False, "detail": "sim_mode"}
+    client = S.get("client")
+    if not client:
+        return {"success": False, "detail": "no_client"}
+    email = S.get("email") or "_"
+    try:
+        _to = float(os.getenv("QUOTEX_GET_ALL_ASSETS_TIMEOUT_SEC", "75") or 75)
+        _to = max(20.0, min(_to, 180.0))
+        otc, live, all_a, payouts = run_async_for(
+            email, _fetch_open_assets_for_ui(client), _to
+        )
+    except Exception as e:
+        log.warning("api/assets: %s", e)
+        return {"success": False, "detail": "تعذّر جلب الأزواج من المنصة"}
+    return {
+        "success": True,
+        "from_quotex": True,
+        "assets": {"otc": otc, "live": live, "all": all_a},
+        "payouts": payouts,
+    }
 
 @app.get("/api/status")
 async def status(token: str=""):

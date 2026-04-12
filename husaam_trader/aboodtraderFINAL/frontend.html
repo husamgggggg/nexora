@@ -689,7 +689,7 @@ const DEFAULT_ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','E
 const DEFAULT_ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
 const DEFAULT_ASSETS=[...DEFAULT_ASSETS_OTC,...DEFAULT_ASSETS_LIVE];
 const ASSETS_REFRESH_INTERVAL_MS=10*60*1000;
-const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0};
+const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetsQuotexSynced:false,assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0};
 const MAX_ASSETS=3;
 const PAIR_FLAGS={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz'};
 DEFAULT_ASSETS.forEach(a=>{
@@ -699,10 +699,13 @@ DEFAULT_ASSETS.forEach(a=>{
 });
 function getAvailableAssets(kind){
   const arr=s.availableAssets&&Array.isArray(s.availableAssets[kind])?s.availableAssets[kind]:[];
+  if(s.assetsQuotexSynced)return arr;
   if(arr.length>0)return arr;
   return kind==='otc'?[...DEFAULT_ASSETS_OTC]:[...DEFAULT_ASSETS_LIVE];
 }
 function getAvailableAssetSet(){
+  if(s.assetsQuotexSynced&&s.availableAssets&&Array.isArray(s.availableAssets.all))
+    return new Set(s.availableAssets.all);
   const all=(s.availableAssets&&Array.isArray(s.availableAssets.all)&&s.availableAssets.all.length>0)
     ?s.availableAssets.all
     :[...DEFAULT_ASSETS];
@@ -732,6 +735,7 @@ async function refreshAvailableAssets(notify){
     live:Array.isArray(a.live)?a.live:[],
     all:all
   };
+  if(d.from_quotex===true)s.assetsQuotexSynced=true;
   if(d.payouts&&typeof d.payouts==='object')Object.assign(s.assetPayout,d.payouts);
   s.lastAssetsSyncAt=Date.now();
   sanitizeSelectedAssets(!!notify);
@@ -879,7 +883,9 @@ function afterLogin(d){
 async function doLogout(){
   if(assetsInitTimer){clearTimeout(assetsInitTimer);assetsInitTimer=null;}
   doStop();clearInterval(s.pollInt);if(s.token)await api('/logout','POST',{token:s.token});
-  s.token='';s.email='';s.running=false;localStorage.removeItem('at_email');go('sReg',-1);toast('تم تسجيل الخروج','');
+  s.token='';s.email='';s.running=false;s.assetsQuotexSynced=false;
+  s.availableAssets={otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]};
+  localStorage.removeItem('at_email');go('sReg',-1);toast('تم تسجيل الخروج','');
 }
 async function togBot(){s.running?doStop():doStart();}
 async function doStart(){
