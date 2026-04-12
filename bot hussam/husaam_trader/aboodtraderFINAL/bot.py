@@ -3035,6 +3035,29 @@ async def _check_win(client, tid):
         return {"win":bool(win),"profit":float(prf or 0)}
     except: return {"win":False,"profit":0.0}
 
+
+def _session_trade_pnl(win: bool, stake: float, raw_from_api: float) -> float:
+    """
+    نتيجة صفقة واحدة لصافي الجلسة (مجموع الصفقات) — وليس من فرق الرصيد:
+    - خسارة كاملة: دائماً -قيمة الدخول (تفادي خطأ عندما تعيد المنصة profit سالباً فيُعاد قلب الإشارة).
+    - ربح: الربح الصافي فقط. الافتراض أن get_profit() يعيد صافي الربح؛ إن كان يعيد العائد
+      الكامل (دخول+ربح) عيّن QUOTEX_WIN_PROFIT_IS_GROSS=1.
+    """
+    a = float(stake or 0)
+    if a < 0:
+        a = 0.0
+    a = round(a, 2)
+    if not win:
+        return round(-a, 2) if a else 0.0
+    x = float(raw_from_api or 0)
+    if x < 0:
+        x = 0.0
+    if os.getenv("QUOTEX_WIN_PROFIT_IS_GROSS", "").strip().lower() in ("1", "true", "yes"):
+        if x > a + 1e-9:
+            x = x - a
+    return round(x, 2)
+
+
 async def _close(client):
     try:
         if client:
@@ -3494,18 +3517,20 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             # ── النتائج لكل صفقة في الـ Burst ─────────────────────────────
             total_prf = 0.0
             for trade, tid in opened_trades:
+                stake = float(trade.get("amount") or req.amount or 0)
                 try:
                     if QX and tid and S["client"]:
                         r2 = run_async_for(S["email"], _check_win(S["client"], tid), 25)
                         win = r2["win"]
-                        prf = r2["profit"] if win else -(r2.get("profit", 0) or req.amount)
+                        prf = _session_trade_pnl(win, stake, float(r2.get("profit") or 0))
                     else:
                         win = random.random() < 0.58
-                        prf = round(req.amount * 0.80, 2) if win else -req.amount
+                        raw_sim = round(stake * 0.80, 2) if win else 0.0
+                        prf = _session_trade_pnl(win, stake, raw_sim)
                 except Exception as ex:
                     log.warning("⚠️ تعذر تسوية صفقة (id=%s): %s — تُحتسب خسارة تقريبية", tid, ex)
                     win = False
-                    prf = -float(req.amount)
+                    prf = _session_trade_pnl(False, stake, 0.0)
 
                 prf = round(prf, 2)
                 total_prf += prf
