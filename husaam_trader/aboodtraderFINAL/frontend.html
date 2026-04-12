@@ -418,12 +418,21 @@ body{
 .sup-item{padding:15px 16px;border-radius:16px;gap:12px;}
 .sup-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(77,183,255,.08);border-radius:10px;color:var(--cyan);font-size:14px;}
 #sAcc .mni,#sBot .sc,#sBot .irow,#sBot .rc,#sSt .pbar-wrap,#sSt .tlog,#sSup .sup-item{margin-bottom:12px;}
+.ringWinWrap{display:flex;flex-direction:column;align-items:center;gap:6px;}
+.ringValAbove{
+  position:relative;
+  z-index:2;
+  font-size:22px;
+  font-weight:900;
+  color:var(--tx);
+  line-height:1.1;
+}
 .ring{
   --p:0;
   width:66px;
   height:66px;
   border-radius:50%;
-  margin:10px auto 0;
+  margin:0 auto;
   display:flex;
   align-items:center;
   justify-content:center;
@@ -437,6 +446,7 @@ body{
   border-radius:50%;
   background:rgba(7,17,31,.8);
   border:1px solid rgba(159,176,200,.14);
+  z-index:0;
 }
 .ringVal{
   position:relative;
@@ -548,8 +558,8 @@ h1{font-size:18px;}
   </div>
   <div class="sl">اختيار الحساب</div>
   <div class="agrd">
-    <div class="ao" id="bReal" onclick="selAcc('real')"><div class="at">REAL</div><div class="ab" id="rBalB">0.00</div><div class="ar">ID</div></div>
-    <div class="ao sel" id="bDemo" onclick="selAcc('demo')"><div class="at">DEMO</div><div class="ab" id="dBalB">0.00</div><div class="ar">ID</div></div>
+    <div class="ao" id="bReal" onclick="selAcc('real')"><div class="at">REAL</div><div class="ab" id="rBalB">0.00</div></div>
+    <div class="ao sel" id="bDemo" onclick="selAcc('demo')"><div class="at">DEMO</div><div class="ab" id="dBalB">0.00</div></div>
   </div>
   <div class="sl">الإعدادات</div>
   <div class="sc">
@@ -609,8 +619,9 @@ h1{font-size:18px;}
         </svg>
         <span id="stWinLbl">نسبة الفوز</span>
       </div>
-      <div class="ring" id="ringRat" style="--p:0">
-        <div class="ringVal stv g" id="sRat">0%</div>
+      <div class="ringWinWrap">
+        <div class="ringValAbove stv g" id="sRat">0%</div>
+        <div class="ring" id="ringRat" style="--p:0" aria-hidden="true"></div>
       </div>
     </div>
     <div class="stc">
@@ -697,7 +708,7 @@ const DEFAULT_ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','E
 const DEFAULT_ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
 const DEFAULT_ASSETS=[...DEFAULT_ASSETS_OTC,...DEFAULT_ASSETS_LIVE];
 const ASSETS_REFRESH_INTERVAL_MS=10*60*1000;
-const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM_EMA10',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetsAwaitingQuotex:false,assetsQuotexSynced:false,assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0};
+const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM_EMA10',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetsAwaitingQuotex:false,assetsQuotexSynced:false,assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0,demoLimit:0,demoUsed:0,realMinBal:50,limitsInt:null};
 const MAX_ASSETS=3;
 const FIAT_FLAG={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz',CHF:'ch',MXN:'mx',TRY:'tr',ZAR:'za',CNY:'cn',CNH:'cn',HKD:'hk',SGD:'sg',NOK:'no',SEK:'se',DKK:'dk',PLN:'pl',RUB:'ru',INR:'in',BRL:'br',KRW:'kr',THB:'th',IDR:'id',PHP:'ph',MYR:'my',HUF:'hu',CZK:'cz',ILS:'il',AED:'ae',SAR:'sa',USDT:'us',USDC:'us',BUSD:'us',TUSD:'us',DAI:'us'};
 const QUOTE_SUFFIXES=['USDT','USDC','BUSD','TUSD','DAI','EUR','GBP','USD','JPY','AUD','CAD','CHF','NZD','MXN','TRY','ZAR','SEK','NOK','DKK','PLN','CNY','CNH','HKD','SGD','INR','RUB','BRL','KRW','THB','IDR','PHP','MYR','HUF','CZK','ILS','AED','SAR'];
@@ -870,9 +881,31 @@ async function api(path,method='GET',body=null){
     return null;
   }
 }
+function _localDemoDayKey(){
+  try{return new Date().toISOString().slice(0,10);}catch(_){return'';}
+}
+function _localSimDemoStorageKey(){
+  const e=String(s.email||'').trim().toLowerCase();if(!e)return null;return 'nexora_demo_daily_'+e+'_'+_localDemoDayKey();
+}
+function getLocalSimDemoCount(){
+  const k=_localSimDemoStorageKey();if(!k)return 0;return parseInt(localStorage.getItem(k)||'0',10)||0;
+}
+function incLocalSimDemoCount(delta){
+  const k=_localSimDemoStorageKey();if(!k||!delta)return 0;
+  const n=(parseInt(localStorage.getItem(k)||'0',10)||0)+delta;
+  localStorage.setItem(k,String(n));
+  return n;
+}
+function applyStatusLimits(d){
+  if(!d||typeof d!=='object')return;
+  if(d.demo_max_trades_per_day!=null)s.demoLimit=Math.max(0,Number(d.demo_max_trades_per_day)||0);
+  if(d.demo_trades_today!=null)s.demoUsed=Math.max(0,Number(d.demo_trades_today)||0);
+  if(d.real_min_balance_usd!=null)s.realMinBal=Number(d.real_min_balance_usd)||50;
+}
 async function checkConn(){
   const d=await api('/status?token='+s.token);
   if(d && typeof d.sim_mode==='boolean') s.sim=!!d.sim_mode;
+  if(d)applyStatusLimits(d);
   renderBadge();
 }
 function renderBadge(){
@@ -936,7 +969,7 @@ async function doPin(){
       }
       if(st&&st.logged_in){
         btn.disabled=false;btn.textContent='تأكيد الرمز';
-        afterLogin({success:true,email:st.email,user_id:st.user_id,real_balance:st.real_balance,demo_balance:st.demo_balance,currency:st.currency,sim_mode:st.sim_mode});
+        afterLogin({success:true,email:st.email,user_id:st.user_id,real_balance:st.real_balance,demo_balance:st.demo_balance,currency:st.currency,sim_mode:st.sim_mode,demo_max_trades_per_day:st.demo_max_trades_per_day,demo_trades_today:st.demo_trades_today,real_min_balance_usd:st.real_min_balance_usd});
         return;
       }
     }
@@ -951,15 +984,22 @@ function afterLogin(d){
   s.sim=!!d.sim_mode;
   renderBadge();
   s.email=d.email;s.uid='#'+d.user_id;s.rBal=d.real_balance||0;s.dBal=d.demo_balance||0;s.currency=d.currency||'USD';
+  applyStatusLimits(d);
   document.getElementById('hId').textContent=s.uid;document.getElementById('hEm').textContent=s.email;document.getElementById('dEm').textContent=s.email;
   document.getElementById('pinBox').style.display='none';document.getElementById('loginBox').style.display='block';
   if(!s.sim){setRealQuotexAssetsPending();scheduleQuotexAssetRefreshRetries();}
   else{s.assetsAwaitingQuotex=false;}
-  updBals();toast('✅ مرحباً بك في نيكسو تريد','ok');go('sBot',2);scheduleAssetsRefreshAfterLogin();if(!s.sim)startPoll();
+  updBals();toast('✅ مرحباً بك في نيكسو تريد','ok');go('sBot',2);scheduleAssetsRefreshAfterLogin();
+  if(s.sim){
+    if(s.limitsInt)clearInterval(s.limitsInt);
+    s.limitsInt=setInterval(()=>{if(s.token)api('/status?token='+encodeURIComponent(s.token)).then(st=>{if(st)applyStatusLimits(st);});},25000);
+  }
+  if(!s.sim)startPoll();
 }
 async function doLogout(){
   if(assetsInitTimer){clearTimeout(assetsInitTimer);assetsInitTimer=null;}
   clearQuotexAssetRetryTimers();
+  if(s.limitsInt){clearInterval(s.limitsInt);s.limitsInt=null;}
   doStop();clearInterval(s.pollInt);if(s.token)await api('/logout','POST',{token:s.token});
   s.token='';s.email='';s.running=false;s.assetsQuotexSynced=false;s.assetsAwaitingQuotex=false;
   s.availableAssets={otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]};
@@ -971,6 +1011,15 @@ async function doStart(){
   const pl=s.pOn?(parseFloat(document.getElementById('iPL').value)||0):0;
   const sl=s.sOn?(parseFloat(document.getElementById('iSL').value)||0):0;
   if(amt<=0)return toast('أدخل مبلغ صحيح','er');
+  const limD=Math.max(0,Number(s.demoLimit)||0);
+  if(s.acc==='demo'&&limD>0){
+    const used=s.sim?getLocalSimDemoCount():Math.max(0,Number(s.demoUsed)||0);
+    if(used>=limD)return toast('وصلت الحد اليومي لصفقات التجريبي ('+limD+'). يُتاح المزيد غداً أو استخدم الحساب الحقيقي.','er');
+  }
+  const minReal=Math.max(0,Number(s.realMinBal)||50);
+  if(s.acc==='real'&&!s.sim&&(Number(s.rBal)||0)<minReal){
+    return toast('رصيد الحساب الحقيقي أقل من الحد الأدنى المطلوب لتشغيل البوت ('+minReal+' USD).','er');
+  }
   sanitizeSelectedAssets(false);
   const allowed=getAvailableAssetSet();
   const assetList=(s.assets.length>0?s.assets:[s.asset]).filter(a=>allowed.has(a));
@@ -979,7 +1028,17 @@ async function doStart(){
   s.asset=assetList[0];
   updAssetLabel();
   const body={asset:assetList[0],assets:assetList,amount:amt,strategy:s.strategy,account_type:s.acc,profit_limit:pl,stop_loss:sl,token:s.token};
-  if(!s.sim){const d=await api('/bot/start','POST',body);if(d&&!d.success)return toast(d.detail||'فشل','er');}
+  if(!s.sim){
+    const d=await api('/bot/start','POST',body);
+    if(d&&d.success!==true){
+      let msg='فشل';
+      const det=d.detail;
+      if(typeof det==='string')msg=det;
+      else if(Array.isArray(det)&&det[0]&&det[0].msg)msg=String(det[0].msg);
+      else if(d.message)msg=String(d.message);
+      return toast(msg,'er');
+    }
+  }
   s.running=true;document.getElementById('stBtn').textContent='إيقاف البوت';document.getElementById('stBtn').classList.add('stop');
   toast('تم تشغيل البوت بنجاح','ok');if(s.sim)simCycle(amt,pl,sl);
 }
@@ -996,6 +1055,13 @@ function simCycle(amt,pl,sl){
     const tr={asset:s.asset,direction:dir,amount:amt,strategy:s.strategy,status:win?'win':'loss',profit:prf,started_at:new Date().toISOString(),account:s.acc};
     if(win)s.wins++;else s.losses++;s.profit+=prf;
     if(s.acc==='real')s.rBal=Math.max(0,s.rBal+prf);else s.dBal=Math.max(0,s.dBal+prf);
+    if(s.acc==='demo'){
+      const limD=Math.max(0,Number(s.demoLimit)||0);
+      if(limD>0){
+        const n=incLocalSimDemoCount(1);
+        if(n>=limD){addLog(tr);updBals();updStats();updProfit(pl);doStop();toast('وصلت الحد اليومي لصفقات التجريبي ('+limD+').','er');return;}
+      }
+    }
     addLog(tr);updBals();updStats();updProfit(pl);
     toast(win?`✅ +${prf} ${s.currency}`:`❌ -${Math.abs(prf)} ${s.currency}`,win?'ok':'er');
     if(pl>0&&s.profit>=pl){doStop();toast(`🎯 وصلت لهدف الربح +${pl}`,'ok');return;}
@@ -1325,6 +1391,7 @@ if(_em){
         s.email=d.email||_em;s.rBal=d.real_balance||0;s.dBal=d.demo_balance||0;
         s.currency=d.currency||'USD';s.wins=d.wins||0;s.losses=d.losses||0;
         s.profit=d.session_profit||0;s.running=d.running||false;
+        applyStatusLimits(d);
         const uid='#'+Math.abs(Array.from(s.email).reduce((a,c)=>a+c.charCodeAt(0),0)%90000000+10000000);
         document.getElementById('hId').textContent=uid;
         document.getElementById('hEm').textContent=s.email;
@@ -1333,7 +1400,12 @@ if(_em){
         if(s.running){document.getElementById('stBtn').textContent='إيقاف البوت';document.getElementById('stBtn').classList.add('stop');}
         if(!s.sim){setRealQuotexAssetsPending();scheduleQuotexAssetRefreshRetries();}
         else{s.assetsAwaitingQuotex=false;}
-        go('sBot',2);scheduleAssetsRefreshAfterLogin();if(!s.sim)startPoll();
+        go('sBot',2);scheduleAssetsRefreshAfterLogin();
+        if(s.sim){
+          if(s.limitsInt)clearInterval(s.limitsInt);
+          s.limitsInt=setInterval(()=>{if(s.token)api('/status?token='+encodeURIComponent(s.token)).then(st=>{if(st)applyStatusLimits(st);});},25000);
+        }
+        if(!s.sim)startPoll();
         toast('✅ تم استعادة جلستك','ok');
       }else{go('sLogin',-1);}
     })();

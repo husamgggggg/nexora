@@ -754,6 +754,10 @@ _install_pyquotex_ws_proxy_patch(QX_HTTP_PROXIES)
 
 USERS_F  = "data/users.json"
 USERS_SESSIONS_F = "data/user_trading_sessions.json"
+ADMIN_SETTINGS_F = "data/admin_settings.json"
+DEMO_DAILY_TRADES_F = "data/demo_daily_trades.json"
+# الحد الأدنى لتشغيل البوت على الحساب الحقيقي (USD)
+REAL_MIN_BALANCE_USD = 50.0
 ADMIN_PW = os.getenv("ADMIN_PW", "Admin@2024")
 _ALLOWED_ORIGINS_RAW = os.getenv(
     "ALLOWED_ORIGINS",
@@ -819,6 +823,65 @@ def _persist_admin_token(t: str):
 _load_admin_tokens_into_set()
 
 def save_users(): save(USERS_F, USERS)
+
+
+def _demo_stat_email_key(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def _admin_settings_dict() -> dict:
+    raw = load(ADMIN_SETTINGS_F, {})
+    if not isinstance(raw, dict):
+        raw = {}
+    try:
+        lim = int(raw.get("demo_max_trades_per_day", 5))
+    except (TypeError, ValueError):
+        lim = 5
+    if lim < 0:
+        lim = 0
+    return {"demo_max_trades_per_day": lim}
+
+
+def _demo_trades_daily_limit() -> int:
+    """0 = بلا حد يومي للتجريبي."""
+    return int(_admin_settings_dict().get("demo_max_trades_per_day", 0) or 0)
+
+
+def _demo_trades_today_count(email: str) -> int:
+    data = load(DEMO_DAILY_TRADES_F, {})
+    if not isinstance(data, dict):
+        return 0
+    key = _demo_stat_email_key(email)
+    by_email = data.get(key)
+    if not isinstance(by_email, dict):
+        return 0
+    day = datetime.now().strftime("%Y-%m-%d")
+    try:
+        return int(by_email.get(day, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _demo_trades_increment(email: str, n: int) -> int:
+    if n <= 0:
+        return _demo_trades_today_count(email)
+    data = load(DEMO_DAILY_TRADES_F, {})
+    if not isinstance(data, dict):
+        data = {}
+    key = _demo_stat_email_key(email)
+    day = datetime.now().strftime("%Y-%m-%d")
+    if key not in data or not isinstance(data.get(key), dict):
+        data[key] = {}
+    try:
+        prev = int(data[key].get(day, 0) or 0)
+    except (TypeError, ValueError):
+        prev = 0
+    data[key][day] = prev + int(n)
+    try:
+        save(DEMO_DAILY_TRADES_F, data)
+    except Exception:
+        pass
+    return int(data[key][day])
 
 
 def _load_ux_sessions() -> list:
@@ -1119,6 +1182,10 @@ class ApproveReq(BaseModel):
     email: str
     action: str
     note: str = ""
+
+class AdminSettingsReq(BaseModel):
+    admin_token: str
+    demo_max_trades_per_day: int
 
 # ── Async Loop ────────────────────────────────────────────────────────────────
 _loop = asyncio.new_event_loop()
@@ -3331,6 +3398,19 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 f"🎯 {direction.upper()} | تنفيذ فوري | {datetime.now().strftime('%H:%M:%S')} | مدة={trade_duration_sec}s"
             )
 
+            _dlim = _demo_trades_daily_limit()
+            if req.account_type == "demo" and _dlim > 0:
+                _dct = _demo_trades_today_count(S.get("email") or "")
+                if _dct >= _dlim:
+                    msg = (
+                        f"🛑 وصلت الحد اليومي لصفقات التجريبي ({_dlim} صفقات). توقّف البوت."
+                    )
+                    log.info(msg)
+                    S["status_msg"] = msg
+                    S["running"] = False
+                    stop.set()
+                    break
+
             # ── تسجيل/تنفيذ الصفقات (Burst) ────────────────────────────────
             opened_trades = []
             for i in range(max(1, int(burst_count))):
@@ -3485,6 +3565,16 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 f"💰 رصيد={current_bal} | بداية={start_bal} | Δرصيد={bal_delta:+.2f} | صافي صفقات={real_profit:+.2f}"
             )
 
+            if req.account_type == "demo" and _dlim > 0 and opened_trades:
+                new_c = _demo_trades_increment(S.get("email") or "", len(opened_trades))
+                if new_c >= _dlim:
+                    msg = f"🛑 وصلت الحد اليومي لصفقات التجريبي ({_dlim} صفقات). توقّف البوت."
+                    log.info(msg)
+                    S["status_msg"] = msg
+                    S["running"] = False
+                    stop.set()
+                    break
+
             # ── فحص الحدود ────────────────────────────────────────────────
             if req.profit_limit > 0 and real_profit >= req.profit_limit:
                 msg = f"🎯 وصلت لهدف الربح! +{real_profit} {S['currency']} (الهدف: +{req.profit_limit})"
@@ -3630,6 +3720,27 @@ async def admin_login(req: AdminLoginReq):
     t = secrets.token_hex(16)
     _persist_admin_token(t)
     return {"success": True, "token": t}
+
+@app.get("/api/admin/settings")
+async def admin_get_settings(admin_token: str):
+    if admin_token not in ADMIN_TOKENS:
+        raise HTTPException(403, "غير مصرح")
+    st = _admin_settings_dict()
+    return {
+        "demo_max_trades_per_day": st.get("demo_max_trades_per_day", 5),
+        "real_min_balance_usd": REAL_MIN_BALANCE_USD,
+    }
+
+@app.post("/api/admin/settings")
+async def admin_post_settings(req: AdminSettingsReq):
+    if req.admin_token not in ADMIN_TOKENS:
+        raise HTTPException(403, "غير مصرح")
+    lim = int(req.demo_max_trades_per_day)
+    if lim < 0:
+        lim = 0
+    save(ADMIN_SETTINGS_F, {"demo_max_trades_per_day": lim})
+    log.info("⚙️ إعدادات المسؤول: demo_max_trades_per_day=%s", lim)
+    return {"success": True, "demo_max_trades_per_day": lim}
 
 @app.get("/api/admin/users")
 async def admin_users(admin_token: str):
@@ -3875,10 +3986,15 @@ async def login(req: LoginReq):
     S["status_msg"] = ""
     if not QX:
         _ux_session_open(S)
+    _dlim_l = _demo_trades_daily_limit()
+    _dused_l = _demo_trades_today_count(email_key)
     return {"success":True,"needs_pin":False,"email":email_key,
             "user_id":abs(hash(email_key))%90_000_000+10_000_000,
             "real_balance":S["real_balance"],"demo_balance":S["demo_balance"],
-            "currency":S["currency"],"sim_mode":_is_session_sim_mode(S)}
+            "currency":S["currency"],"sim_mode":_is_session_sim_mode(S),
+            "demo_max_trades_per_day": _dlim_l,
+            "demo_trades_today": _dused_l,
+            "real_min_balance_usd": REAL_MIN_BALANCE_USD}
 
 @app.post("/api/pin")
 async def pin_ep(req: PinReq):
@@ -3891,8 +4007,14 @@ async def pin_ep(req: PinReq):
         S["logged_in"]=True; S["needs_pin"]=False
         if not S.get("_ux_session_id"):
             _ux_session_open(S)
+        _pk = S.get("email") or ""
+        _dlim_p = _demo_trades_daily_limit()
+        _dused_p = _demo_trades_today_count(_pk)
         return {"success":True,"email":S["email"],"user_id":12345678,
-                "real_balance":0.0,"demo_balance":10_000.0,"currency":"USD","sim_mode":True}
+                "real_balance":0.0,"demo_balance":10_000.0,"currency":"USD","sim_mode":True,
+                "demo_max_trades_per_day": _dlim_p,
+                "demo_trades_today": _dused_p,
+                "real_min_balance_usd": REAL_MIN_BALANCE_USD}
     get_pin_q(S["email"]).put(p)
     # إرجاع فوري حتى لا يقطع Nginx الطلب (504) بسبب proxy_read_timeout الافتراضي (~60s).
     # الواجهة تستطلع /api/status حتى يصبح logged_in=true بعد انتهاء connect() في الخلفية.
@@ -3926,6 +4048,22 @@ async def start(req: BotReq):
     if not S: raise HTTPException(403,"جلسة غير صالحة")
     if not S["logged_in"]: raise HTTPException(401,"سجّل الدخول أولاً")
     if S["running"]: raise HTTPException(400,"البوت يعمل بالفعل")
+    if (req.account_type or "").lower() == "real":
+        rb = float(S.get("real_balance") or 0.0)
+        if rb < REAL_MIN_BALANCE_USD:
+            raise HTTPException(
+                400,
+                f"رصيد الحساب الحقيقي ({rb:.2f} USD) أقل من الحد الأدنى المطلوب لتشغيل البوت ({REAL_MIN_BALANCE_USD:.0f} USD).",
+            )
+    if (req.account_type or "").lower() == "demo":
+        dlim = _demo_trades_daily_limit()
+        if dlim > 0:
+            cur = _demo_trades_today_count(S.get("email") or "")
+            if cur >= dlim:
+                raise HTTPException(
+                    400,
+                    f"وصلت الحد اليومي لصفقات الحساب التجريبي ({dlim} صفقات). يُتاح المزيد غداً أو استخدم الحساب الحقيقي.",
+                )
     # ── إعادة تعيين كاملة لكل جلسة جديدة ──────────────────────────────────
     # أوقف أي thread قديم أولاً
     old_stop = S.get("stop_event")
@@ -4008,6 +4146,8 @@ async def status(token: str=""):
     total = S["wins"]+S["losses"]
     _em = S.get("email") or ""
     _uid = abs(hash(_em)) % 90_000_000 + 10_000_000 if _em else 0
+    _dlim = _demo_trades_daily_limit()
+    _dused = _demo_trades_today_count(_em) if _em else 0
     return {
         "logged_in":      S["logged_in"],
         "needs_pin":      S["needs_pin"],
@@ -4031,6 +4171,10 @@ async def status(token: str=""):
         "candle_source":  S.get("candle_source",""),
         "status_msg":     S.get("status_msg",""),
         "login_error":    (S.get("login_error") or "")[:800],
+        "demo_max_trades_per_day": _dlim,
+        "demo_trades_today":       _dused,
+        "demo_limit_reached":      bool(_dlim > 0 and _dused >= _dlim),
+        "real_min_balance_usd":    REAL_MIN_BALANCE_USD,
     }
 
 if __name__ == "__main__":

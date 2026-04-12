@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>NEXORA TRADE | منصة التداول</title>
+<title>NEXO TRADE | منصة التداول</title>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#050810">
@@ -154,7 +154,7 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .sr:last-child{border-bottom:none;}
 .sr:active{background:var(--g3);}
 .slb{font-size:11px;color:var(--mu3);}
-.sv{font-size:14px;font-weight:900;display:flex;align-items:center;gap:5px;color:var(--tx);}
+.sv{font-size:14px;font-weight:900;display:flex;align-items:center;gap:5px;color:var(--tx);min-width:0;flex:1;}
 .irow{background:var(--card);margin:0 14px 10px;border-radius:14px;border:1px solid var(--br);overflow:hidden;}
 .iitem{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--br);}
 .iitem:last-child{border-bottom:none;}
@@ -273,7 +273,16 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .oi .sub{font-size:10px;color:var(--mu3);margin-top:3px;font-weight:400;}
 .oi-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
 .oi-main{display:flex;align-items:center;gap:8px;min-width:0;}
-.oi-flag{width:16px;height:12px;border-radius:2px;object-fit:cover;border:1px solid rgba(255,255,255,.14);display:block;}
+.oi-flag{width:18px;height:18px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,.2);display:block;box-shadow:0 0 0 1px rgba(0,0,0,.2) inset;}
+.oi-gen,.vaf-gen{display:inline-flex;align-items:center;justify-content:center;min-width:18px;width:18px;height:18px;padding:0;border-radius:50%;background:linear-gradient(145deg,#3d4f6b,#283548);color:#d0dce8;font-size:6px;font-weight:900;line-height:1;border:1px solid rgba(255,255,255,.16);box-sizing:border-box;}
+.vaf-gen{min-width:15px;width:15px;height:15px;font-size:5px;}
+.oi-gen.oi-metal,.vaf-gen.oi-metal{background:linear-gradient(145deg,#c9a227,#7a5c1a);color:#fff;border-color:rgba(255,220,120,.25);}
+.oi-ic{display:inline-flex;align-items:center;gap:2px;flex-shrink:0;}
+.vAsset-bar{min-width:0;flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:4px 5px;font-size:11px;font-weight:800;line-height:1.25;color:var(--tx);}
+.vaf-chip{display:inline-flex;align-items:center;gap:3px;min-width:0;max-width:100%;}
+.vaf-f{width:15px;height:15px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,.2);box-shadow:0 0 0 1px rgba(0,0,0,.2) inset;}
+.vaf-sep{color:var(--mu3);font-weight:800;padding:0 1px;flex-shrink:0;}
+.vaf-txt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:7.5rem;}
 .oi-name{font-size:13px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .oi-rate{font-size:11px;color:var(--or);font-weight:900;}
 .oi-check{font-size:14px;color:transparent;font-weight:900;min-width:16px;text-align:left;}
@@ -409,12 +418,21 @@ body{
 .sup-item{padding:15px 16px;border-radius:16px;gap:12px;}
 .sup-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(77,183,255,.08);border-radius:10px;color:var(--cyan);font-size:14px;}
 #sAcc .mni,#sBot .sc,#sBot .irow,#sBot .rc,#sSt .pbar-wrap,#sSt .tlog,#sSup .sup-item{margin-bottom:12px;}
+.ringWinWrap{display:flex;flex-direction:column;align-items:center;gap:6px;}
+.ringValAbove{
+  position:relative;
+  z-index:2;
+  font-size:22px;
+  font-weight:900;
+  color:var(--tx);
+  line-height:1.1;
+}
 .ring{
   --p:0;
   width:66px;
   height:66px;
   border-radius:50%;
-  margin:10px auto 0;
+  margin:0 auto;
   display:flex;
   align-items:center;
   justify-content:center;
@@ -428,6 +446,7 @@ body{
   border-radius:50%;
   background:rgba(7,17,31,.8);
   border:1px solid rgba(159,176,200,.14);
+  z-index:0;
 }
 .ringVal{
   position:relative;
@@ -503,12 +522,12 @@ h1{font-size:18px;}
 <!-- ══ ACCOUNT ══ -->
 <div id="sAcc" class="scr">
   <div class="hdr">
-    <div class="logo-wrap"><div class="logo-top">نيكسورا تريد</div><div class="logo-main">NEXORA <span>TRADE</span></div></div>
+    <div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main">NEXO <span>TRADE</span></div></div>
     <div class="hdr-r"><div class="hdr-id" id="hId">#00000000</div><div class="hdr-em" id="hEm">email</div></div>
   </div>
   <div id="simA"></div>
   <div class="acc-hero">
-    <div class="acc-badge">نيكسورا تريد</div>
+    <div class="acc-badge">نيكسو تريد</div>
     <div class="acc-name" id="dEm">مرحباً</div>
     <div class="acc-conn"><span class="dot"></span>متصل بـ Quotex</div>
   </div>
@@ -534,18 +553,18 @@ h1{font-size:18px;}
 <!-- ══ BOT ══ -->
 <div id="sBot" class="scr">
   <div class="hdr">
-    <div class="logo-wrap"><div class="logo-top">نيكسورا تريد</div><div class="logo-main">NEXORA <span>TRADE</span></div></div>
+    <div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main">NEXO <span>TRADE</span></div></div>
     <div id="simB"></div>
   </div>
   <div class="sl">اختيار الحساب</div>
   <div class="agrd">
-    <div class="ao" id="bReal" onclick="selAcc('real')"><div class="at">REAL</div><div class="ab" id="rBalB">0.00</div><div class="ar">ID</div></div>
-    <div class="ao sel" id="bDemo" onclick="selAcc('demo')"><div class="at">DEMO</div><div class="ab" id="dBalB">0.00</div><div class="ar">ID</div></div>
+    <div class="ao" id="bReal" onclick="selAcc('real')"><div class="at">REAL</div><div class="ab" id="rBalB">0.00</div></div>
+    <div class="ao sel" id="bDemo" onclick="selAcc('demo')"><div class="at">DEMO</div><div class="ab" id="dBalB">0.00</div></div>
   </div>
   <div class="sl">الإعدادات</div>
   <div class="sc">
-    <div class="sr" onclick="om('assets')"><div class="sv"><span id="vAsset" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">EURUSD OTC</span><span class="ch">‹</span></div><div class="slb">الأزواج المختارة</div></div>
-    <div class="sr" onclick="om('strategy')"><div class="sv"><span id="vStrat">NEXORA</span><span class="ch">‹</span></div><div class="slb">الاستراتيجية</div></div>
+    <div class="sr" onclick="om('assets')"><div class="sv"><span id="vAsset" class="vAsset-bar">EUR/USD (OTC)</span><span class="ch">‹</span></div><div class="slb">الأزواج المختارة</div></div>
+    <div class="sr" onclick="om('strategy')"><div class="sv"><span id="vStrat">PREMIUM</span><span class="ch">‹</span></div><div class="slb">الاستراتيجية</div></div>
   </div>
   <div class="sl">المبلغ والحدود</div>
   <div class="irow">
@@ -576,7 +595,7 @@ h1{font-size:18px;}
 
 <!-- ══ STATS ══ -->
 <div id="sSt" class="scr">
-  <div class="hdr"><div class="logo-wrap"><div class="logo-top">نيكسورا تريد</div><div class="logo-main" id="stTitle">الإحصائيات</div></div></div>
+  <div class="hdr"><div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main" id="stTitle">الإحصائيات</div></div></div>
   <div class="langRow">
     <button class="langBtn sel" id="langAr" type="button" onclick="setLang('ar')">العربية</button>
     <button class="langBtn" id="langEn" type="button" onclick="setLang('en')">English</button>
@@ -600,8 +619,9 @@ h1{font-size:18px;}
         </svg>
         <span id="stWinLbl">نسبة الفوز</span>
       </div>
-      <div class="ring" id="ringRat" style="--p:0">
-        <div class="ringVal stv g" id="sRat">0%</div>
+      <div class="ringWinWrap">
+        <div class="ringValAbove stv g" id="sRat">0%</div>
+        <div class="ring" id="ringRat" style="--p:0" aria-hidden="true"></div>
       </div>
     </div>
     <div class="stc">
@@ -639,13 +659,12 @@ h1{font-size:18px;}
 
 <!-- ══ SUPPORT ══ -->
 <div id="sSup" class="scr">
-  <div class="hdr"><div class="logo-wrap"><div class="logo-top">نيكسورا تريد</div><div class="logo-main">الدعم</div></div></div>
+  <div class="hdr"><div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main">الدعم</div></div></div>
   <div style="padding:18px 16px 12px"><div style="font-size:18px;font-weight:900;margin-bottom:4px">مركز المساعدة</div><div style="font-size:12px;color:var(--mu3)">الأسئلة الشائعة وإرشادات الاستخدام</div></div>
   <div style="margin:0 14px;display:flex;flex-direction:column;gap:8px">
     <div class="sup-item" onclick="openHelp('start')"><span class="sup-icon">🚀</span><span>كيف أبدأ التداول؟</span></div>
     <div class="sup-item" onclick="openHelp('real_demo')"><span class="sup-icon">💰</span><span>ما الفرق بين الحساب الحقيقي والتجريبي؟</span></div>
     <div class="sup-item" onclick="openHelp('profit_loss')"><span class="sup-icon">🎯</span><span>كيف أضبط هدف الربح وحد الخسارة؟</span></div>
-    <div class="sup-item" onclick="openHelp('best_strategy')"><span class="sup-icon">📊</span><span>ما الاستراتيجية الأفضل؟</span></div>
     <div class="sup-item" onclick="openHelp('multi_assets')"><span class="sup-icon">🔗</span><span>كيف أختار أكثر من زوج؟</span></div>
   </div>
   <div class="nav">
@@ -661,7 +680,7 @@ h1{font-size:18px;}
   <div class="lvc">
     <button class="lvc-close" onclick="closeLiveByUser()" title="إغلاق">×</button>
     <div class="lp" id="lPair">EURUSD</div>
-    <div class="lsub" id="lStrat">NEXORA STRATEGY</div>
+    <div class="lsub" id="lStrat">PREMIUM</div>
     <div class="ld up" id="lDir">▲ شراء</div>
     <div class="lm">
       <div class="lmi"><div class="lml">المبلغ</div><div class="lmv" id="lAmt">10</div></div>
@@ -685,42 +704,163 @@ h1{font-size:18px;}
 <div class="trade-pop" id="tradePop"></div>
 
 <script>
-const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null};
-const ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','EURJPY_otc','GBPJPY_otc','AUDCAD_otc','USDCAD_otc','EURGBP_otc','EURAUD_otc','GBPAUD_otc','NZDUSD_otc'];
-const ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
-const ASSETS=[...ASSETS_OTC,...ASSETS_LIVE];
+const DEFAULT_ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','EURJPY_otc','GBPJPY_otc','AUDCAD_otc','USDCAD_otc','EURGBP_otc','EURAUD_otc','GBPAUD_otc','NZDUSD_otc'];
+const DEFAULT_ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
+const DEFAULT_ASSETS=[...DEFAULT_ASSETS_OTC,...DEFAULT_ASSETS_LIVE];
+const ASSETS_REFRESH_INTERVAL_MS=10*60*1000;
+const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM_EMA10',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetsAwaitingQuotex:false,assetsQuotexSynced:false,assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0,demoLimit:0,demoUsed:0,realMinBal:50,limitsInt:null};
 const MAX_ASSETS=3;
-const PAIR_FLAGS={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz'};
-const ASSET_PAYOUT={};
-ASSETS.forEach(a=>{
+const FIAT_FLAG={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz',CHF:'ch',MXN:'mx',TRY:'tr',ZAR:'za',CNY:'cn',CNH:'cn',HKD:'hk',SGD:'sg',NOK:'no',SEK:'se',DKK:'dk',PLN:'pl',RUB:'ru',INR:'in',BRL:'br',KRW:'kr',THB:'th',IDR:'id',PHP:'ph',MYR:'my',HUF:'hu',CZK:'cz',ILS:'il',AED:'ae',SAR:'sa',USDT:'us',USDC:'us',BUSD:'us',TUSD:'us',DAI:'us'};
+const QUOTE_SUFFIXES=['USDT','USDC','BUSD','TUSD','DAI','EUR','GBP','USD','JPY','AUD','CAD','CHF','NZD','MXN','TRY','ZAR','SEK','NOK','DKK','PLN','CNY','CNH','HKD','SGD','INR','RUB','BRL','KRW','THB','IDR','PHP','MYR','HUF','CZK','ILS','AED','SAR'];
+const CRYPTO_ICON_BASE='https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color';
+const CRYPTO_ICON_SLUG={BTC:'btc',ETH:'eth',BNB:'bnb',BCH:'bch',LTC:'ltc',XRP:'xrp',ADA:'ada',SOL:'sol',DOGE:'doge',TRX:'trx',DOT:'dot',LINK:'link',AVAX:'avax',AVA:'avax',ATOM:'atom',NEAR:'near',APT:'apt',ARB:'arb',OP:'op',XLM:'xlm',ETC:'etc',FIL:'fil',ICP:'icp',SHIB:'shib',UNI:'uni',AXS:'axs',MATIC:'matic',LRC:'lrc',APE:'ape',CRO:'cro',FTM:'ftm',ALGO:'algo',MANA:'mana',SAND:'sand',GRT:'grt',EOS:'eos',XTZ:'xtz',XMR:'xmr',ZEC:'zec',DASH:'dash',NEO:'neo',QTUM:'qtum',WAVES:'waves',THETA:'theta',VET:'vet',HBAR:'hbar',INJ:'inj',SUI:'sui',SEI:'sei',TIA:'tia',ORDI:'ordi',WIF:'wif',BONK:'bonk',PEPE:'pepe',FET:'fet',LUNA:'luna',RUNE:'rune',CRV:'crv',MKR:'mkr',SNX:'snx',COMP:'comp',YFI:'yfi',SUSHI:'sushi',AAVE:'aave',ENJ:'enj',CHZ:'chz',FLOW:'flow',GALA:'gala',IMX:'imx',STX:'stx',TWT:'twt',PAXG:'paxg','1INCH':'1inch'};
+const METAL_BADGE={XAU:'Au',XAG:'Ag',XPT:'Pt',XPD:'Pd'};
+const COMMODITY_BADGE={OIL:'Oil',WTI:'WTI',BRENT:'Br',NATGAS:'Ng',XBR:'Br',XTI:'WT',XNG:'Ng'};
+DEFAULT_ASSETS.forEach(a=>{
   const min=a.endsWith('_otc')?72:60;
   const max=a.endsWith('_otc')?92:86;
-  ASSET_PAYOUT[a]=Math.round(min+Math.random()*(max-min));
+  s.assetPayout[a]=Math.round(min+Math.random()*(max-min));
 });
+function getAvailableAssets(kind){
+  const arr=s.availableAssets&&Array.isArray(s.availableAssets[kind])?s.availableAssets[kind]:[];
+  /* وضع Quotex الحقيقي: لا تعرض DEFAULT أثناء انتظار /api/assets — يمنع ظهور أزواج غير مفتوحة */
+  if(s.assetsAwaitingQuotex&&!s.assetsQuotexSynced)return arr;
+  if(s.assetsQuotexSynced)return arr;
+  if(arr.length>0)return arr;
+  return kind==='otc'?[...DEFAULT_ASSETS_OTC]:[...DEFAULT_ASSETS_LIVE];
+}
+function getAvailableAssetSet(){
+  if(s.assetsQuotexSynced&&s.availableAssets&&Array.isArray(s.availableAssets.all))
+    return new Set(s.availableAssets.all);
+  if(s.assetsAwaitingQuotex&&!s.assetsQuotexSynced)
+    return new Set(Array.isArray(s.availableAssets?.all)?s.availableAssets.all:[]);
+  const all=(s.availableAssets&&Array.isArray(s.availableAssets.all)&&s.availableAssets.all.length>0)
+    ?s.availableAssets.all
+    :[...DEFAULT_ASSETS];
+  return new Set(all);
+}
+function sanitizeSelectedAssets(notify){
+  const allowed=getAvailableAssetSet();
+  const before=s.assets.length;
+  s.assets=s.assets.filter(a=>allowed.has(a));
+  if(!allowed.has(s.asset))s.asset=s.assets[0]||Array.from(allowed)[0]||'';
+  if(s.assets.length===0&&s.asset)s.assets=[s.asset];
+  const removed=before-s.assets.length;
+  if(notify&&removed>0&&Date.now()-s.lastAssetsWarnAt>4000){
+    s.lastAssetsWarnAt=Date.now();
+    toast('تم حذف أزواج مغلقة من اختيارك تلقائياً','wa');
+  }
+  updAssetLabel();
+}
+async function refreshAvailableAssets(notify){
+  if(!s.token)return;
+  const d=await api('/assets?token='+encodeURIComponent(s.token));
+  if(!d||d.success===false)return;
+  const a=d.assets||{};
+  const all=Array.isArray(a.all)?a.all:[];
+  s.availableAssets={
+    otc:Array.isArray(a.otc)?a.otc:[],
+    live:Array.isArray(a.live)?a.live:[],
+    all:all
+  };
+  if(d.from_quotex===true){
+    s.assetsQuotexSynced=true;
+    s.assetsAwaitingQuotex=false;
+  }
+  if(d.payouts&&typeof d.payouts==='object')Object.assign(s.assetPayout,d.payouts);
+  s.lastAssetsSyncAt=Date.now();
+  sanitizeSelectedAssets(!!notify);
+}
+let _quotexAssetRetryTimers=[];
+function clearQuotexAssetRetryTimers(){
+  _quotexAssetRetryTimers.forEach(t=>clearTimeout(t));
+  _quotexAssetRetryTimers=[];
+}
+function setRealQuotexAssetsPending(){
+  s.assetsAwaitingQuotex=true;
+  s.assetsQuotexSynced=false;
+  s.availableAssets={otc:[],live:[],all:[]};
+  sanitizeSelectedAssets(false);
+}
+function scheduleQuotexAssetRefreshRetries(){
+  clearQuotexAssetRetryTimers();
+  if(s.sim||!s.token)return;
+  const delays=[600,2000,5000,12000,25000,45000];
+  delays.forEach(ms=>{
+    _quotexAssetRetryTimers.push(setTimeout(()=>{
+      if(s.sim||!s.token)return;
+      refreshAvailableAssets(false);
+    },ms));
+  });
+}
+let assetsInitTimer=null;
+function scheduleAssetsRefreshAfterLogin(){
+  if(assetsInitTimer){clearTimeout(assetsInitTimer);assetsInitTimer=null;}
+  if(s.sim||!s.token)return;
+  assetsInitTimer=setTimeout(()=>{
+    assetsInitTimer=null;
+    refreshAvailableAssets(true);
+  },30000);
+}
 function tickSimPayouts(){
-  ASSETS.forEach(a=>{
+  getAvailableAssetSet().forEach(a=>{
     const min=a.endsWith('_otc')?72:60;
     const max=a.endsWith('_otc')?92:86;
     const step=(Math.random()<0.5?-1:1)*(1+Math.floor(Math.random()*2));
-    ASSET_PAYOUT[a]=Math.max(min,Math.min(max,(ASSET_PAYOUT[a]||min)+step));
+    s.assetPayout[a]=Math.max(min,Math.min(max,(s.assetPayout[a]||min)+step));
   });
 }
 setInterval(tickSimPayouts, 9000);
-const STRATEGIES=[
-  {key:'HUSAAM',label:'NEXORA',sub:'منهجية متعددة المؤشرات لفرص التداول عالية الجودة'},
-  {key:'HUSAAM_EMA10',label:'NEXORA EMA10',sub:'ارتدادات EMA10 على شموع الدقيقة مع تأكيد مغلق'}
-];
-const STRAT_LABELS={HUSAAM:'NEXORA',HUSAAM_EMA10:'EMA10'};
-function pairFlags(asset){
-  const p=asset.replace('_otc','');
-  const b=p.slice(0,3),q=p.slice(3,6);
-  return [PAIR_FLAGS[b]||'un',PAIR_FLAGS[q]||'un'];
+const STRATEGIES=[{key:'HUSAAM_EMA10',label:'PREMIUM'}];
+const STRAT_LABELS={HUSAAM_EMA10:'PREMIUM',HUSAAM:'PREMIUM'};
+(function ensureStrategyKey(){
+  if(!STRATEGIES.some(st=>st.key===s.strategy))s.strategy=STRATEGIES[0].key;
+  const vs=document.getElementById('vStrat');if(vs)vs.textContent=STRAT_LABELS[s.strategy]||STRATEGIES[0].label;
+})();
+function escHtml(t){
+  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-function pairLabel(asset){return asset.replace('_otc',' OTC');}
-function pairPayout(asset){return `${ASSET_PAYOUT[asset]||80}%`;}
+function splitBaseQuote(asset){
+  const raw0=String(asset||'');
+  const otc=/_otc$/i.test(raw0);
+  let raw=raw0.replace(/_otc$/i,'').toUpperCase();
+  for(let i=0;i<QUOTE_SUFFIXES.length;i++){
+    const q=QUOTE_SUFFIXES[i];
+    if(raw.length>q.length&&raw.endsWith(q))return{base:raw.slice(0,-q.length),quote:q,otc};
+  }
+  if(raw.length===6&&/^[A-Z]{6}$/.test(raw))return{base:raw.slice(0,3),quote:raw.slice(3),otc};
+  return{base:raw,quote:'',otc};
+}
+function pairLabel(asset){
+  const{base,quote,otc}=splitBaseQuote(asset);
+  let t=quote?`${base}/${quote}`:base;
+  if(otc)t+=' (OTC)';
+  return t;
+}
+function tokenIconHtml(tok,imgCls,genCls){
+  const u=String(tok||'').toUpperCase();
+  if(!u)return `<span class="${genCls}" aria-hidden="true">·</span>`;
+  if(METAL_BADGE[u])return `<span class="${genCls} oi-metal">${escHtml(METAL_BADGE[u])}</span>`;
+  if(COMMODITY_BADGE[u])return `<span class="${genCls} oi-metal">${escHtml(COMMODITY_BADGE[u])}</span>`;
+  if(FIAT_FLAG[u])return `<img class="${imgCls}" src="https://flagcdn.com/w20/${FIAT_FLAG[u]}.png" alt="">`;
+  const slug=CRYPTO_ICON_SLUG[u]||null;
+  if(slug)return `<img class="${imgCls}" src="${CRYPTO_ICON_BASE}/${slug}.png" alt="">`;
+  return `<span class="${genCls}">${escHtml(u.slice(0,Math.min(3,u.length)))}</span>`;
+}
+function pairIconsHtml(asset,imgCls,genCls){
+  const{base,quote}=splitBaseQuote(asset);
+  if(quote)return `<span class="oi-ic">${tokenIconHtml(base,imgCls,genCls)}${tokenIconHtml(quote,imgCls,genCls)}</span>`;
+  return `<span class="oi-ic">${tokenIconHtml(base,imgCls,genCls)}${tokenIconHtml('USD',imgCls,genCls)}</span>`;
+}
+function pairPayout(asset){return `${s.assetPayout[asset]||80}%`;}
 function renderPairOption(asset){
-  const [b,q]=pairFlags(asset);
-  return `<div class="oi-row"><div class="oi-main"><span class="oi-check">✓</span></div><div class="oi-main"><span class="oi-name">${pairLabel(asset)}</span><img class="oi-flag" src="https://flagcdn.com/w20/${b}.png" alt="${b}"><img class="oi-flag" src="https://flagcdn.com/w20/${q}.png" alt="${q}"></div></div>`;
+  const icons=pairIconsHtml(asset,'oi-flag','oi-gen');
+  return `<div class="oi-row"><div class="oi-main"><span class="oi-check">✓</span></div><div class="oi-main"><span class="oi-name">${escHtml(pairLabel(asset))}</span>${icons}</div></div>`;
+}
+function renderAssetLabelChip(asset){
+  if(!asset)return '';
+  const icons=pairIconsHtml(asset,'oi-flag vaf-f','vaf-gen');
+  return `<span class="vaf-chip">${icons}<span class="vaf-txt">${escHtml(pairLabel(asset))}</span></span>`;
 }
 async function api(path,method='GET',body=null){
   const url='/api'+path;
@@ -741,9 +881,31 @@ async function api(path,method='GET',body=null){
     return null;
   }
 }
+function _localDemoDayKey(){
+  try{return new Date().toISOString().slice(0,10);}catch(_){return'';}
+}
+function _localSimDemoStorageKey(){
+  const e=String(s.email||'').trim().toLowerCase();if(!e)return null;return 'nexora_demo_daily_'+e+'_'+_localDemoDayKey();
+}
+function getLocalSimDemoCount(){
+  const k=_localSimDemoStorageKey();if(!k)return 0;return parseInt(localStorage.getItem(k)||'0',10)||0;
+}
+function incLocalSimDemoCount(delta){
+  const k=_localSimDemoStorageKey();if(!k||!delta)return 0;
+  const n=(parseInt(localStorage.getItem(k)||'0',10)||0)+delta;
+  localStorage.setItem(k,String(n));
+  return n;
+}
+function applyStatusLimits(d){
+  if(!d||typeof d!=='object')return;
+  if(d.demo_max_trades_per_day!=null)s.demoLimit=Math.max(0,Number(d.demo_max_trades_per_day)||0);
+  if(d.demo_trades_today!=null)s.demoUsed=Math.max(0,Number(d.demo_trades_today)||0);
+  if(d.real_min_balance_usd!=null)s.realMinBal=Number(d.real_min_balance_usd)||50;
+}
 async function checkConn(){
   const d=await api('/status?token='+s.token);
   if(d && typeof d.sim_mode==='boolean') s.sim=!!d.sim_mode;
+  if(d)applyStatusLimits(d);
   renderBadge();
 }
 function renderBadge(){
@@ -807,7 +969,7 @@ async function doPin(){
       }
       if(st&&st.logged_in){
         btn.disabled=false;btn.textContent='تأكيد الرمز';
-        afterLogin({success:true,email:st.email,user_id:st.user_id,real_balance:st.real_balance,demo_balance:st.demo_balance,currency:st.currency,sim_mode:st.sim_mode});
+        afterLogin({success:true,email:st.email,user_id:st.user_id,real_balance:st.real_balance,demo_balance:st.demo_balance,currency:st.currency,sim_mode:st.sim_mode,demo_max_trades_per_day:st.demo_max_trades_per_day,demo_trades_today:st.demo_trades_today,real_min_balance_usd:st.real_min_balance_usd});
         return;
       }
     }
@@ -822,13 +984,26 @@ function afterLogin(d){
   s.sim=!!d.sim_mode;
   renderBadge();
   s.email=d.email;s.uid='#'+d.user_id;s.rBal=d.real_balance||0;s.dBal=d.demo_balance||0;s.currency=d.currency||'USD';
+  applyStatusLimits(d);
   document.getElementById('hId').textContent=s.uid;document.getElementById('hEm').textContent=s.email;document.getElementById('dEm').textContent=s.email;
   document.getElementById('pinBox').style.display='none';document.getElementById('loginBox').style.display='block';
-  updBals();toast('✅ مرحباً بك في نيكسورا تريد','ok');go('sBot',2);if(!s.sim)startPoll();
+  if(!s.sim){setRealQuotexAssetsPending();scheduleQuotexAssetRefreshRetries();}
+  else{s.assetsAwaitingQuotex=false;}
+  updBals();toast('✅ مرحباً بك في نيكسو تريد','ok');go('sBot',2);scheduleAssetsRefreshAfterLogin();
+  if(s.sim){
+    if(s.limitsInt)clearInterval(s.limitsInt);
+    s.limitsInt=setInterval(()=>{if(s.token)api('/status?token='+encodeURIComponent(s.token)).then(st=>{if(st)applyStatusLimits(st);});},25000);
+  }
+  if(!s.sim)startPoll();
 }
 async function doLogout(){
+  if(assetsInitTimer){clearTimeout(assetsInitTimer);assetsInitTimer=null;}
+  clearQuotexAssetRetryTimers();
+  if(s.limitsInt){clearInterval(s.limitsInt);s.limitsInt=null;}
   doStop();clearInterval(s.pollInt);if(s.token)await api('/logout','POST',{token:s.token});
-  s.token='';s.email='';s.running=false;localStorage.removeItem('at_email');go('sReg',-1);toast('تم تسجيل الخروج','');
+  s.token='';s.email='';s.running=false;s.assetsQuotexSynced=false;s.assetsAwaitingQuotex=false;
+  s.availableAssets={otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]};
+  localStorage.removeItem('at_email');go('sReg',-1);toast('تم تسجيل الخروج','');
 }
 async function togBot(){s.running?doStop():doStart();}
 async function doStart(){
@@ -836,9 +1011,34 @@ async function doStart(){
   const pl=s.pOn?(parseFloat(document.getElementById('iPL').value)||0):0;
   const sl=s.sOn?(parseFloat(document.getElementById('iSL').value)||0):0;
   if(amt<=0)return toast('أدخل مبلغ صحيح','er');
-  const assetList=s.assets.length>0?s.assets:[s.asset];
+  const limD=Math.max(0,Number(s.demoLimit)||0);
+  if(s.acc==='demo'&&limD>0){
+    const used=s.sim?getLocalSimDemoCount():Math.max(0,Number(s.demoUsed)||0);
+    if(used>=limD)return toast('وصلت الحد اليومي لصفقات التجريبي ('+limD+'). يُتاح المزيد غداً أو استخدم الحساب الحقيقي.','er');
+  }
+  const minReal=Math.max(0,Number(s.realMinBal)||50);
+  if(s.acc==='real'&&!s.sim&&(Number(s.rBal)||0)<minReal){
+    return toast('رصيد الحساب الحقيقي أقل من الحد الأدنى المطلوب لتشغيل البوت ('+minReal+' USD).','er');
+  }
+  sanitizeSelectedAssets(false);
+  const allowed=getAvailableAssetSet();
+  const assetList=(s.assets.length>0?s.assets:[s.asset]).filter(a=>allowed.has(a));
+  if(assetList.length===0)return toast('لا يوجد أزواج متاحة للتداول الآن','er');
+  s.assets=[...assetList];
+  s.asset=assetList[0];
+  updAssetLabel();
   const body={asset:assetList[0],assets:assetList,amount:amt,strategy:s.strategy,account_type:s.acc,profit_limit:pl,stop_loss:sl,token:s.token};
-  if(!s.sim){const d=await api('/bot/start','POST',body);if(d&&!d.success)return toast(d.detail||'فشل','er');}
+  if(!s.sim){
+    const d=await api('/bot/start','POST',body);
+    if(d&&d.success!==true){
+      let msg='فشل';
+      const det=d.detail;
+      if(typeof det==='string')msg=det;
+      else if(Array.isArray(det)&&det[0]&&det[0].msg)msg=String(det[0].msg);
+      else if(d.message)msg=String(d.message);
+      return toast(msg,'er');
+    }
+  }
   s.running=true;document.getElementById('stBtn').textContent='إيقاف البوت';document.getElementById('stBtn').classList.add('stop');
   toast('تم تشغيل البوت بنجاح','ok');if(s.sim)simCycle(amt,pl,sl);
 }
@@ -855,6 +1055,13 @@ function simCycle(amt,pl,sl){
     const tr={asset:s.asset,direction:dir,amount:amt,strategy:s.strategy,status:win?'win':'loss',profit:prf,started_at:new Date().toISOString(),account:s.acc};
     if(win)s.wins++;else s.losses++;s.profit+=prf;
     if(s.acc==='real')s.rBal=Math.max(0,s.rBal+prf);else s.dBal=Math.max(0,s.dBal+prf);
+    if(s.acc==='demo'){
+      const limD=Math.max(0,Number(s.demoLimit)||0);
+      if(limD>0){
+        const n=incLocalSimDemoCount(1);
+        if(n>=limD){addLog(tr);updBals();updStats();updProfit(pl);doStop();toast('وصلت الحد اليومي لصفقات التجريبي ('+limD+').','er');return;}
+      }
+    }
     addLog(tr);updBals();updStats();updProfit(pl);
     toast(win?`✅ +${prf} ${s.currency}`:`❌ -${Math.abs(prf)} ${s.currency}`,win?'ok':'er');
     if(pl>0&&s.profit>=pl){doStop();toast(`🎯 وصلت لهدف الربح +${pl}`,'ok');return;}
@@ -867,8 +1074,8 @@ function showLive(asset,dir,secs,tradeId=''){
   const isUp=dir==='call';
   const ov=document.getElementById('ov');
   ov.dataset.tradeId=tradeId||'';
-  document.getElementById('lPair').textContent=asset.replace('_otc',' OTC');
-  document.getElementById('lStrat').textContent=(STRAT_LABELS[s.strategy]||s.strategy).toUpperCase()+' STRATEGY';
+  document.getElementById('lPair').textContent=pairLabel(asset);
+  document.getElementById('lStrat').textContent=STRAT_LABELS[s.strategy]||'PREMIUM';
   document.getElementById('lDir').textContent=isUp?'▲ شراء':'▼ بيع';
   document.getElementById('lDir').className='ld '+(isUp?'up':'dn');
   document.getElementById('lAmt').textContent=(document.getElementById('iAmt').value||10)+' '+s.currency;
@@ -896,6 +1103,7 @@ function showTradePopup(msg){
 function startPoll(){
   s.pollInt=setInterval(async()=>{
     const d=await api('/status?token='+s.token);if(!d)return;
+    if(Date.now()-s.lastAssetsSyncAt>ASSETS_REFRESH_INTERVAL_MS)refreshAvailableAssets(false);
     s.rBal=d.real_balance;s.dBal=d.demo_balance;if(d.currency)s.currency=d.currency;
     s.wins=d.wins;s.losses=d.losses;s.profit=d.session_profit||0;
     updBals();updStats();
@@ -906,7 +1114,7 @@ function startPoll(){
       if(String(s.hiddenLiveTradeId||'')!==tid)showLive(d.current_trade.asset,d.current_trade.direction,Number(d.current_trade.duration||60),tid);
       if(tid && s.lastTradePopupId!==tid){
         s.lastTradePopupId=tid;
-        const a=(d.current_trade.asset||'').replace('_otc',' OTC');
+        const a=pairLabel(d.current_trade.asset||'');
         const dr=d.current_trade.direction==='call'?'شراء':'بيع';
         showTradePopup(`تم فتح صفقة ${dr} على ${a}`);
       }
@@ -1024,17 +1232,6 @@ const HELP={
       </div>
     `
   },
-  best_strategy:{
-    title:'ما الاستراتيجية الأفضل؟',
-    body:`
-      <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
-        الأفضل يعتمد على السوق، لكن عادةً:
-        <br>- إن كنت تريد فرصاً أكثر: جرّب استراتيجيات EMA10 أو HUSAAM بعد تعديل الحدود.
-        <br>- إن كنت تريد تأكيد أعلى: جرّب HUSAAM_PRIVATE أو الوضع الصارم (HUSAAM).
-        <br><br>ابدأ بـ Demo ثم قيّم Win Rate وربح/خسارة الجلسة.
-      </div>
-    `
-  },
   multi_assets:{
     title:'كيف أختار أكثر من زوج؟',
     body:`
@@ -1082,13 +1279,13 @@ function addLog(tr){
   if(!list)return;
   const nt=list.querySelector('.nt');if(nt)nt.remove();
   const win=tr.status==='win';const el=document.createElement('div');el.className='tli';
-  el.innerHTML=`<div class="tlr ${win?'w':tr.status==='loss'?'l':''}">${tr.status==='pending'?'جارية...':(win?'+':'')+tr.profit+' '+s.currency}</div><div class="tld ${tr.direction==='call'?'up':'dn'}">${tr.direction==='call'?'▲ شراء':'▼ بيع'}</div><div><div class="tlp">${(tr.asset||'').replace('_otc',' OTC')}</div><div class="tlt">${new Date(tr.started_at).toLocaleTimeString('ar')}</div></div>`;
+    el.innerHTML=`<div class="tlr ${win?'w':tr.status==='loss'?'l':''}">${tr.status==='pending'?'جارية...':(win?'+':'')+tr.profit+' '+s.currency}</div><div class="tld ${tr.direction==='call'?'up':'dn'}">${tr.direction==='call'?'▲ شراء':'▼ بيع'}</div><div><div class="tlp">${escHtml(pairLabel(tr.asset||''))}</div><div class="tlt">${new Date(tr.started_at).toLocaleTimeString('ar')}</div></div>`;
   list.insertBefore(el,list.firstChild);while(list.children.length>50)list.removeChild(list.lastChild);
 }
 function renderLogs(trades){
   const list=document.getElementById('logL');if(!list)return;list.innerHTML='';
   trades.forEach(t=>{const win=t.status==='win';const el=document.createElement('div');el.className='tli';
-    el.innerHTML=`<div class="tlr ${win?'w':'l'}">${win?'+':''}${t.profit||0} ${s.currency}</div><div class="tld ${t.direction==='call'?'up':'dn'}">${t.direction==='call'?'▲ شراء':'▼ بيع'}</div><div><div class="tlp">${(t.asset||'').replace('_otc',' OTC')}</div><div class="tlt">${new Date(t.started_at).toLocaleTimeString('ar')}</div></div>`;
+    el.innerHTML=`<div class="tlr ${win?'w':'l'}">${win?'+':''}${t.profit||0} ${s.currency}</div><div class="tld ${t.direction==='call'?'up':'dn'}">${t.direction==='call'?'▲ شراء':'▼ بيع'}</div><div><div class="tlp">${escHtml(pairLabel(t.asset||''))}</div><div class="tlt">${new Date(t.started_at).toLocaleTimeString('ar')}</div></div>`;
     list.appendChild(el);});
 }
 function selAcc(t){s.acc=t;document.getElementById('bReal').classList.toggle('sel',t==='real');document.getElementById('bDemo').classList.toggle('sel',t==='demo');}
@@ -1098,22 +1295,44 @@ document.addEventListener('input',e=>{
   if(e.target.id==='iPL'&&s.pOn)document.getElementById('plDesc').textContent=`يوقف عند +${e.target.value}`;
   if(e.target.id==='iSL'&&s.sOn)document.getElementById('slDesc').textContent=`يوقف عند -${e.target.value}`;
 });
-function updAssetLabel(){const arr=s.assets.length>0?s.assets:[s.asset];document.getElementById('vAsset').textContent=arr.map(a=>a.replace('_otc',' OTC')).join(' · ');}
+function updAssetLabel(){
+  const el=document.getElementById('vAsset');
+  if(!el)return;
+  const arr=(s.assets.length>0?s.assets:[s.asset]).filter(Boolean);
+  if(arr.length===0){
+    el.textContent=s.assetsAwaitingQuotex&&!s.assetsQuotexSynced?'… جاري جلب الأزواج من المنصة':'لا يوجد زوج متاح';
+    return;
+  }
+  el.innerHTML=arr.map(renderAssetLabelChip).join('<span class="vaf-sep"> / </span>');
+}
 function om(key){
   if(key==='assets'){
     document.getElementById('mTit').textContent='اختر الأزواج';
     const list=document.getElementById('mList');list.innerHTML='';
+    sanitizeSelectedAssets(false);
+    const otcAssets=getAvailableAssets('otc');
+    const liveAssets=getAvailableAssets('live');
+    if(otcAssets.length===0&&liveAssets.length===0){
+      const msg=document.createElement('div');
+      msg.style.cssText='padding:16px 8px;color:var(--tx2);font-size:13px;font-weight:700;text-align:center;line-height:1.65;white-space:pre-line;';
+      msg.textContent=s.assetsAwaitingQuotex&&!s.assetsQuotexSynced
+        ?'جاري جلب الأزواج المفتوحة من Quotex…\nأعد فتح القائمة بعد قليل إن استمرت فارغة.'
+        :'لا يوجد أزواج مفتوحة حالياً. جرّب بعد قليل.';
+      list.appendChild(msg);
+      document.getElementById('mbg').classList.add('on');
+      return;
+    }
     const h1=document.createElement('div');h1.style.cssText='font-size:10px;color:var(--gold);font-weight:700;padding:4px 2px 8px;letter-spacing:1px;';h1.textContent='── OTC ──';list.appendChild(h1);
-    ASSETS_OTC.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
+    otcAssets.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
     const h2=document.createElement('div');h2.style.cssText='font-size:10px;color:var(--g);font-weight:700;padding:10px 2px 8px;letter-spacing:1px;';h2.textContent='── البورصة ──';list.appendChild(h2);
-    ASSETS_LIVE.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
+    liveAssets.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
     const conf=document.createElement('button');conf.style.cssText='width:100%;margin-top:14px;background:linear-gradient(135deg,var(--g),var(--g2));color:var(--bg);border:none;border-radius:13px;padding:14px;font-family:Roboto,sans-serif;font-size:14px;font-weight:900;cursor:pointer;';
     conf.onclick=()=>{if(s.assets.length===0){toast('اختر زوج واحد على الأقل','er');return;}updAssetLabel();cm(null,true);};
     function updateConf(){conf.textContent=`✅ تأكيد (${s.assets.length}/${MAX_ASSETS})`;}updateConf();
     list.appendChild(conf);
   }else if(key==='strategy'){
     document.getElementById('mTit').textContent='اختر الاستراتيجية';const list=document.getElementById('mList');list.innerHTML='';
-    STRATEGIES.forEach(st=>{const el=document.createElement('div');el.className='oi'+(st.key===s.strategy?' sel':'');el.innerHTML=`${st.label}<div class="sub">${st.sub}</div>`;el.onclick=()=>{s.strategy=st.key;document.getElementById('vStrat').textContent=STRAT_LABELS[st.key]||st.label;cm(null,true);};list.appendChild(el);});
+    STRATEGIES.forEach(st=>{const el=document.createElement('div');el.className='oi'+(st.key===s.strategy?' sel':'');el.textContent=st.label;el.onclick=()=>{s.strategy=st.key;document.getElementById('vStrat').textContent=STRAT_LABELS[st.key]||st.label;cm(null,true);};list.appendChild(el);});
   }
   document.getElementById('mbg').classList.add('on');
 }
@@ -1172,13 +1391,21 @@ if(_em){
         s.email=d.email||_em;s.rBal=d.real_balance||0;s.dBal=d.demo_balance||0;
         s.currency=d.currency||'USD';s.wins=d.wins||0;s.losses=d.losses||0;
         s.profit=d.session_profit||0;s.running=d.running||false;
+        applyStatusLimits(d);
         const uid='#'+Math.abs(Array.from(s.email).reduce((a,c)=>a+c.charCodeAt(0),0)%90000000+10000000);
         document.getElementById('hId').textContent=uid;
         document.getElementById('hEm').textContent=s.email;
         document.getElementById('dEm').textContent=s.email;
         updBals();updStats();
         if(s.running){document.getElementById('stBtn').textContent='إيقاف البوت';document.getElementById('stBtn').classList.add('stop');}
-        go('sBot',2);if(!s.sim)startPoll();
+        if(!s.sim){setRealQuotexAssetsPending();scheduleQuotexAssetRefreshRetries();}
+        else{s.assetsAwaitingQuotex=false;}
+        go('sBot',2);scheduleAssetsRefreshAfterLogin();
+        if(s.sim){
+          if(s.limitsInt)clearInterval(s.limitsInt);
+          s.limitsInt=setInterval(()=>{if(s.token)api('/status?token='+encodeURIComponent(s.token)).then(st=>{if(st)applyStatusLimits(st);});},25000);
+        }
+        if(!s.sim)startPoll();
         toast('✅ تم استعادة جلستك','ok');
       }else{go('sLogin',-1);}
     })();
@@ -1186,6 +1413,7 @@ if(_em){
 }
 setLang('ar');
 checkConn();
+updAssetLabel();
 </script>
 <script>
 if ('serviceWorker' in navigator) {

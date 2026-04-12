@@ -302,6 +302,7 @@ tbody tr:last-child td{border-bottom:none;}
   <div class="adm-tabs" role="tablist">
     <button type="button" class="adm-tab on" data-tab="users" role="tab" aria-selected="true" onclick="setAdminTab('users')">المشتركون</button>
     <button type="button" class="adm-tab" data-tab="sessions" role="tab" aria-selected="false" onclick="setAdminTab('sessions')">جلسات الدخول</button>
+    <button type="button" class="adm-tab" data-tab="settings" role="tab" aria-selected="false" onclick="setAdminTab('settings')">إعدادات المنصة</button>
   </div>
 
   <section class="panel adm-pane" id="paneUsers">
@@ -366,6 +367,23 @@ tbody tr:last-child td{border-bottom:none;}
       </table>
     </div>
   </section>
+
+  <section class="panel adm-pane hidden" id="paneSettings">
+    <div class="panel-hd">
+      <div>
+        <h2>إعدادات المنصة</h2>
+        <p>حد صفقات الحساب التجريبي لكل مستخدم في اليوم (التقويم). الحساب الحقيقي بلا حد. القيمة 0 = بدون حد يومي.</p>
+      </div>
+    </div>
+    <div style="padding:22px 24px 28px;max-width:480px;">
+      <div class="fg">
+        <label>الحد اليومي لصفقات التجريبي</label>
+        <input type="number" id="setDemoDaily" min="0" step="1" value="5" inputmode="numeric" style="max-width:200px;">
+      </div>
+      <p class="modal-sub" style="margin:14px 0 18px;">الحد الأدنى لتشغيل البوت على الحساب الحقيقي: <strong id="setRealMinRo">50</strong> USD (ثابت في الخادم).</p>
+      <button type="button" class="btn btn-primary" style="width:auto;min-width:160px;padding:0 22px;" onclick="saveAdminSettings()">حفظ</button>
+    </div>
+  </section>
 </div>
 </div>
 
@@ -405,7 +423,9 @@ function setAdminTab(t){
   });
   document.getElementById('paneUsers').classList.toggle('hidden', t !== 'users');
   document.getElementById('paneSessions').classList.toggle('hidden', t !== 'sessions');
+  document.getElementById('paneSettings').classList.toggle('hidden', t !== 'settings');
   if(t === 'sessions') loadSessions(true);
+  if(t === 'settings') loadAdminSettings();
 }
 
 function fmtSessDt(iso){
@@ -506,6 +526,36 @@ async function api(path, method='GET', body=null){
   } catch { return null; }
 }
 
+async function loadAdminSettings(){
+  if(!AT) return;
+  let r;
+  try{
+    r = await fetch('/api/admin/settings?admin_token='+encodeURIComponent(AT));
+  }catch(_){ return; }
+  if(r.status === 403){
+    toast('انتهت صلاحية الجلسة — سجّل الدخول من جديد', 'er');
+    adminLogout();
+    return;
+  }
+  const d = await r.json().catch(()=>({}));
+  if(d && d.demo_max_trades_per_day != null){
+    const el = document.getElementById('setDemoDaily');
+    if(el) el.value = String(Math.max(0, parseInt(d.demo_max_trades_per_day, 10) || 0));
+  }
+  const ro = document.getElementById('setRealMinRo');
+  if(ro && d.real_min_balance_usd != null) ro.textContent = String(Number(d.real_min_balance_usd).toFixed(0));
+}
+
+async function saveAdminSettings(){
+  if(!AT) return;
+  const el = document.getElementById('setDemoDaily');
+  let v = parseInt(el && el.value, 10);
+  if(Number.isNaN(v) || v < 0) v = 0;
+  const d = await api('/admin/settings','POST',{ admin_token: AT, demo_max_trades_per_day: v });
+  if(d && d.success){ toast('تم حفظ الحد اليومي للتجريبي','ok'); loadAdminSettings(); }
+  else toast((d && d.detail) ? (typeof d.detail === 'string' ? d.detail : 'فشل الحفظ') : 'تعذّر الحفظ','er');
+}
+
 async function adminLogin(){
   const pw = document.getElementById('adminPw').value;
   const d = await api('/admin/login','POST',{password:pw});
@@ -515,6 +565,7 @@ async function adminLogin(){
   document.getElementById('loginBox').style.display = 'none';
   document.getElementById('dashboard').style.display = 'block';
   loadUsers(true);
+  loadAdminSettings(false);
   _startAdminPoll();
 }
 
