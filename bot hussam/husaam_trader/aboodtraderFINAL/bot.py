@@ -1007,8 +1007,23 @@ def run_async(coro, timeout=30):
 # ── loop مستقل لكل مشترك — يمنع تعليق الكل بسبب مشترك واحد ──────────────────
 _session_loops: dict = {}
 _session_loop_lock = threading.Lock()
-# تسلسل جلب شموع 1m عبر كل الحسابات (عدة event loops) — يقلل تداخلًا داخل pyquotex أدى لـ raw_rows=0.
+# قفل عام (اختياري NEXORA_SERIALIZE_QUOTEX_CANDLE_FETCH=global) — كان يسبب طوابير بين الحسابات ومهلة run_async_for.
 _QUOTEX_MINUTE_FETCH_LOCK = threading.Lock()
+_quotex_minute_lock_by_client: dict = {}
+_quotex_minute_lock_by_client_guard = threading.Lock()
+
+
+def _get_quotex_minute_fetch_lock_for_client(client):
+    """قفل لكل عميل Quotex — حسابان لا ينتظران بعضهما عند جلب الشموع."""
+    if client is None:
+        return _QUOTEX_MINUTE_FETCH_LOCK
+    key = id(client)
+    with _quotex_minute_lock_by_client_guard:
+        lk = _quotex_minute_lock_by_client.get(key)
+        if lk is None:
+            lk = threading.Lock()
+            _quotex_minute_lock_by_client[key] = lk
+        return lk
 
 def get_session_loop(email: str):
     with _session_loop_lock:
@@ -1137,8 +1152,8 @@ _HUSAAM_EMA10_SCORE = 10
 _HUSAAM_EMA10_CANDLE_SECS = 60
 # تخزين نتيجة get_candles ناجحة (ثوانٍ) — يقلل الضغط ويحافظ على مصدر واحد مع الشارت
 _HUSAAM_QUOTEX_CACHE_SEC = 90.0
-# مهلة run_async_for لجلب الشموع (بعد v2 قصير + get_candles قصير لكل دورة)
-_HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC = 55.0
+# مهلة run_async_for لجلب الشموع (بعد v2 قصير + get_candles قصير لكل دورة) — يُزاد عبر HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC
+_HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC = 75.0
 
 # ── استراتيجية NEXORA الخاصة (MACD + هستوغرام، شموع 1m مغلقة) ──
 _HUSAAM_PRIVATE_MIN_BARS = 55
@@ -2331,7 +2346,7 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
         )
         if not _throttle:
             log.info(
-                "📊 EMA10 analysis: asset=%s current_asset=%s period=60 need=%s got=%s first_ts=%s last_ts=%s src=%s",
+                "📊 EMA10 analysis: مطلوب=%s ws_current=%s period=60 need=%s got=%s first_ts=%s last_ts=%s src=%s",
                 asset,
                 cur,
                 tgt,
@@ -2355,22 +2370,41 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
             return _finalize(ce["candles"], "quotex_1m_cache")
 
     try:
-        _ser = os.getenv("NEXORA_SERIALIZE_QUOTEX_CANDLE_FETCH", "1").strip().lower()
+        _fto = float(
+            os.getenv(
+                "HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC",
+                str(_HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC),
+            )
+            or _HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC
+        )
+        _fto = max(30.0, min(_fto, 180.0))
+        _ser = os.getenv("NEXORA_SERIALIZE_QUOTEX_CANDLE_FETCH", "per_client").strip().lower()
         if _ser in ("0", "false", "no", "off"):
             lst = run_async_for(
                 email,
                 _fetch_quotex_minute_candles_async(client, asset),
-                _HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC,
+                _fto,
             )
-        else:
+        elif _ser in ("global", "all", "1", "true", "yes", "on"):
             with _QUOTEX_MINUTE_FETCH_LOCK:
                 lst = run_async_for(
                     email,
                     _fetch_quotex_minute_candles_async(client, asset),
-                    _HUSAAM_QUOTEX_FETCH_TIMEOUT_SEC,
+                    _fto,
+                )
+        else:
+            with _get_quotex_minute_fetch_lock_for_client(client):
+                lst = run_async_for(
+                    email,
+                    _fetch_quotex_minute_candles_async(client, asset),
+                    _fto,
                 )
     except Exception as e:
-        log.warning("جلب شموع Quotex: %s", e)
+        _em = str(e).strip()
+        log.warning(
+            "جلب شموع Quotex: %s",
+            _em if _em else type(e).__name__,
+        )
         lst = []
 
     if lst:
@@ -2646,7 +2680,9 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     # ── بدء تدفق الأسعار الحية لكل الأزواج ───────────────────────────────────
     if QX and S["client"]:
         try:
-            run_async_for(S["email"], _ensure_quotex_assets(S["client"]), 45)
+            _assets_to = float(os.getenv("QUOTEX_GET_ALL_ASSETS_TIMEOUT_SEC", "75") or 75)
+            _assets_to = max(20.0, min(_assets_to, 180.0))
+            run_async_for(S["email"], _ensure_quotex_assets(S["client"]), _assets_to)
         except Exception:
             pass
         for a in all_assets:
