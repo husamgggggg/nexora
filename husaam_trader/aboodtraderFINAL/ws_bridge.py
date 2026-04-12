@@ -2,12 +2,8 @@
 """
 جسر WebSocket: Playwright (متصفح) ↔ websockets (محلي) ↔ pyquotex/websocket-client.
 
-مهم: Socket.IO قد يرسل إطارات نصية أو ثنائية؛ تحويل الثنائي إلى نص يفسد البروتوكول.
-نمرّر النص كما هو، والثنائي كـ base64 بين JS وPython ثم نعيد bytes إلى العميل المحلي.
-
-إن كان تسجيل الدخول عبر pyquotex يستخدم بروكسي (QUOTEX_PROXY_URL وغيره) فلا بد أن يمرّ
-نفس البروكسي إلى Chromium هنا؛ وإلا يخرج الـ WebSocket من IP مختلف وقد يرفضه السيرفر
-(يظهر لدى العميل: connection rejected).
+كل اتصال محلي (client_ws) = جلسة مستقلة: upstream واحد في الصفحة، وعند إغلاق المحلي
+يُوقف إعادة الاتصال في JS ويُغلق upstream فوراً — لا retry بعد انتهاء الجلسة.
 
 يُمرَّر عبر ``--proxy-url`` من bot.py أو من البيئة:
 ``QUOTEX_WS_BRIDGE_PROXY`` ثم ``QUOTEX_PROXY_URL`` ثم ``HTTPS_PROXY`` / ``HTTP_PROXY``.
@@ -18,10 +14,56 @@ import base64
 import os
 import traceback
 import urllib.parse
+import uuid
 from typing import Any, Dict, Optional
 
 import websockets
+from websockets.exceptions import ConnectionClosed
+
+try:
+    from websockets.protocol import State as _WsState
+except Exception:  # pragma: no cover
+    _WsState = None  # type: ignore
+
 from playwright.async_api import async_playwright
+
+_SESSION_END = object()
+
+
+def _ws_still_open(conn) -> bool:
+    """True إذا كان بإمكاننا إرسال إطارات نحو العميل المحلي."""
+    if _WsState is not None:
+        try:
+            return conn.state == _WsState.OPEN
+        except Exception:
+            pass
+    try:
+        code = getattr(conn, "close_code", None)
+        return code is None
+    except Exception:
+        return False
+
+
+def _playwright_target_gone(exc: BaseException) -> bool:
+    if type(exc).__name__ == "TargetClosedError":
+        return True
+    msg = str(exc).lower()
+    return "has been closed" in msg and (
+        "target page" in msg or "browser has been closed" in msg or "context" in msg
+    )
+
+
+async def _safe_close_playwright(page, context, browser) -> None:
+    for target, _ in (
+        (page, "page"),
+        (context, "context"),
+        (browser, "browser"),
+    ):
+        try:
+            if target is not None:
+                await target.close()
+        except Exception:
+            pass
 
 
 def _resolve_proxy_url(cli_value: str) -> str:
@@ -43,7 +85,6 @@ def _resolve_proxy_url(cli_value: str) -> str:
 
 
 def _playwright_proxy_config(proxy_url: str) -> Optional[Dict[str, Any]]:
-    """يحوّل http(s):// أو socks5:// إلى صيغة Playwright ``proxy``."""
     raw = (proxy_url or "").strip().strip('"').strip("'")
     if not raw:
         return None
@@ -77,13 +118,22 @@ def _playwright_proxy_config(proxy_url: str) -> Optional[Dict[str, Any]]:
 
 
 async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
-    outbound = asyncio.Queue()
+    session_id = uuid.uuid4().hex[:12]
+    outbound: asyncio.Queue = asyncio.Queue()
+    session_done = asyncio.Event()
+    end_lock = asyncio.Lock()
+
+    print(f"[Bridge] session={session_id} begin | upstream target len={len(target_url or '')}", flush=True)
+
     resolved_proxy = _resolve_proxy_url(proxy_url)
     proxy_cfg = _playwright_proxy_config(resolved_proxy)
     if proxy_cfg:
-        print(f"[Bridge] Playwright context proxy: {proxy_cfg.get('server')}", flush=True)
+        print(f"[Bridge] session={session_id} Playwright proxy: {proxy_cfg.get('server')}", flush=True)
     else:
-        print("[Bridge] Playwright context: no proxy (same IP as VPS — may mismatch pyquotex login IP)", flush=True)
+        print(
+            f"[Bridge] session={session_id} Playwright: no proxy (IP may mismatch pyquotex login)",
+            flush=True,
+        )
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -101,7 +151,6 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
             ctx_kw["proxy"] = proxy_cfg
         context = await browser.new_context(**ctx_kw)
         page = await context.new_page()
-        # عبر بروكسي سكني قد يتأخر domcontentloaded دقائق؛ «commit» أسرع. بدون صفحة يصلح Origin أحياناً.
         nav_url = (os.environ.get("QUOTEX_BRIDGE_NAV_URL") or "https://qxbroker.com").strip()
         skip_nav = os.environ.get("QUOTEX_BRIDGE_SKIP_PAGE_NAV", "").strip().lower() in (
             "1",
@@ -116,20 +165,18 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
         nav_timeout = max(5000, min(nav_timeout, 300000))
         if skip_nav or not nav_url:
             await page.goto("about:blank")
-            print("[Bridge] page: about:blank (skip nav أو URL فارغ)", flush=True)
+            print(f"[Bridge] session={session_id} page: about:blank", flush=True)
         else:
             try:
                 await page.goto(nav_url, wait_until="commit", timeout=nav_timeout)
-                print(f"[Bridge] page: committed {nav_url}", flush=True)
+                print(f"[Bridge] session={session_id} page: committed {nav_url}", flush=True)
             except Exception as nav_err:
-                print(
-                    f"[Bridge] page.goto failed ({nav_err}) — fallback about:blank",
-                    flush=True,
-                )
+                print(f"[Bridge] session={session_id} page.goto failed ({nav_err}) — about:blank", flush=True)
                 await page.goto("about:blank")
 
         async def emit_to_python(payload):
-            """payload من JS: {k:'t', d: str} أو {k:'b', d: base64}"""
+            if session_done.is_set():
+                return
             try:
                 if not isinstance(payload, dict):
                     await outbound.put(("str", str(payload)))
@@ -140,19 +187,63 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                     await outbound.put(("bin", raw))
                 else:
                     await outbound.put(("str", payload.get("d") or ""))
-            except Exception:
-                print("[Bridge] emit_to_python failed")
+            except Exception as e:
+                if _playwright_target_gone(e):
+                    return
+                print(f"[Bridge] session={session_id} emit_to_python failed")
                 print(traceback.format_exc())
 
         await page.expose_function("__bridgeEmit", emit_to_python)
+
+        async def end_session(reason: str) -> None:
+            async with end_lock:
+                if session_done.is_set():
+                    return
+                session_done.set()
+                print(f"[Bridge] session={session_id} end | {reason}", flush=True)
+                try:
+                    await page.evaluate(
+                        "() => { if (window.__bridgeStopUpstream) window.__bridgeStopUpstream(); }"
+                    )
+                except Exception:
+                    pass
+                try:
+                    await outbound.put(_SESSION_END)
+                except Exception:
+                    pass
 
         await page.evaluate(
             """
             () => {
               window.__targetWs = null;
               window.__targetPending = [];
+              window.__bridgeSessionActive = true;
+              window.__reconnectTimer = null;
+
+              window.__bridgeStopUpstream = () => {
+                window.__bridgeSessionActive = false;
+                if (window.__reconnectTimer != null) {
+                  clearTimeout(window.__reconnectTimer);
+                  window.__reconnectTimer = null;
+                }
+                try {
+                  const w = window.__targetWs;
+                  window.__targetWs = null;
+                  if (w) {
+                    w.onopen = null;
+                    w.onclose = null;
+                    w.onerror = null;
+                    w.onmessage = null;
+                    if (w.readyState === 0 || w.readyState === 1) {
+                      w.close(1000, "local bridge session ended");
+                    }
+                  }
+                } catch (e) {}
+                window.__targetPending = [];
+              };
 
               window.__bridgeSend = (txt) => {
+                if (!window.__bridgeSessionActive) return;
                 if (window.__targetWs && window.__targetWs.readyState === 1) {
                   window.__targetWs.send(txt);
                 } else {
@@ -161,6 +252,7 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
               };
 
               window.__bridgeSendBin = (b64) => {
+                if (!window.__bridgeSessionActive) return;
                 const bin = atob(b64);
                 const bytes = new Uint8Array(bin.length);
                 for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -172,6 +264,7 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
               };
 
               const flushPending = () => {
+                if (!window.__bridgeSessionActive) return;
                 if (!window.__targetWs || window.__targetWs.readyState !== 1) return;
                 while (window.__targetPending.length > 0) {
                   const item = window.__targetPending.shift();
@@ -186,17 +279,34 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                 }
               };
 
+              const scheduleReconnect = (targetUrl) => {
+                if (!window.__bridgeSessionActive) return;
+                if (window.__reconnectTimer != null) clearTimeout(window.__reconnectTimer);
+                window.__reconnectTimer = setTimeout(() => {
+                  window.__reconnectTimer = null;
+                  if (window.__bridgeSessionActive) connectTarget(targetUrl);
+                }, 1200);
+              };
+
               const connectTarget = (targetUrl) => {
+                if (!window.__bridgeSessionActive) return;
                 const ws = new WebSocket(targetUrl);
                 window.__targetWs = ws;
                 ws.binaryType = "arraybuffer";
                 ws.onopen = () => {
+                  if (!window.__bridgeSessionActive) {
+                    try { ws.close(1000, "session inactive"); } catch (e) {}
+                    return;
+                  }
                   window.__bridgeEmit({ k: "t", d: "__WS_OPEN__" });
                   flushPending();
                 };
-                ws.onclose = () => {
+                ws.onclose = (ev) => {
+                  const code = ev && ev.code != null ? ev.code : "?";
+                  const reason = (ev && ev.reason) ? String(ev.reason) : "";
+                  window.__bridgeEmit({ k: "t", d: "__WS_DIAG__close|" + code + "|" + reason });
                   window.__bridgeEmit({ k: "t", d: "__WS_CLOSE__" });
-                  setTimeout(() => connectTarget(targetUrl), 1200);
+                  scheduleReconnect(targetUrl);
                 };
                 ws.onerror = () => {
                   window.__bridgeEmit({ k: "t", d: "__WS_ERROR__" });
@@ -236,53 +346,109 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
         await page.evaluate("(targetUrl) => window.__connectTarget(targetUrl)", target_url)
 
         async def from_local_client():
-            async for msg in client_ws:
-                try:
-                    if isinstance(msg, (bytes, bytearray)):
-                        b64 = base64.b64encode(bytes(msg)).decode("ascii")
-                        await page.evaluate("(b64) => window.__bridgeSendBin(b64)", b64)
-                    else:
-                        await page.evaluate("(m) => window.__bridgeSend(m)", str(msg))
-                except Exception:
-                    print("[Bridge] from_local_client send failed")
-                    print(traceback.format_exc())
+            try:
+                async for msg in client_ws:
+                    if session_done.is_set():
+                        break
+                    if not _ws_still_open(client_ws):
+                        break
+                    try:
+                        if isinstance(msg, (bytes, bytearray)):
+                            b64 = base64.b64encode(bytes(msg)).decode("ascii")
+                            await page.evaluate("(b64) => window.__bridgeSendBin(b64)", b64)
+                        else:
+                            await page.evaluate("(m) => window.__bridgeSend(m)", str(msg))
+                    except ConnectionClosed:
+                        break
+                    except Exception as e:
+                        if _playwright_target_gone(e):
+                            break
+                        print(f"[Bridge] session={session_id} from_local_client failed")
+                        print(traceback.format_exc())
+            except ConnectionClosed:
+                pass
+            finally:
+                await end_session("local reader finished")
 
         async def to_local_client():
             while True:
                 item = await outbound.get()
+                if item is _SESSION_END:
+                    break
                 if not isinstance(item, tuple) or len(item) != 2:
                     continue
+                if session_done.is_set():
+                    break
+                if not _ws_still_open(client_ws):
+                    await end_session("local closed before forward")
+                    break
                 kind, data = item
                 if kind == "str":
+                    if isinstance(data, str) and data.startswith("__WS_DIAG__"):
+                        print(f"[Bridge] session={session_id} {data}", flush=True)
+                        continue
                     if data == "__WS_OPEN__":
-                        print("[Bridge] upstream Quotex WebSocket OPEN", flush=True)
+                        print(f"[Bridge] session={session_id} upstream Quotex WebSocket OPEN", flush=True)
                         continue
                     if data == "__WS_CLOSE__":
-                        print("[Bridge] upstream Quotex WebSocket CLOSE", flush=True)
+                        print(f"[Bridge] session={session_id} upstream Quotex WebSocket CLOSE", flush=True)
                         continue
                     if data == "__WS_ERROR__":
-                        print("[Bridge] upstream Quotex WebSocket ERROR", flush=True)
+                        print(f"[Bridge] session={session_id} upstream Quotex WebSocket ERROR", flush=True)
                         continue
                     if data == "__WS_BRIDGE_ERR__":
                         continue
+                    if not _ws_still_open(client_ws):
+                        await end_session("local closed (str payload)")
+                        break
                     try:
                         await client_ws.send(data)
+                    except ConnectionClosed as e:
+                        print(
+                            f"[Bridge] session={session_id} local closed ({e.code}); stop upstream→local",
+                            flush=True,
+                        )
+                        await end_session("ConnectionClosed on str send")
+                        break
                     except Exception:
-                        print("[Bridge] to_local_client str send failed")
+                        print(f"[Bridge] session={session_id} to_local_client str send failed")
                         print(traceback.format_exc())
-                        return
+                        await end_session("str send exception")
+                        break
                 else:
+                    if not _ws_still_open(client_ws):
+                        await end_session("local closed (bin payload)")
+                        break
                     try:
                         await client_ws.send(data)
+                    except ConnectionClosed as e:
+                        print(
+                            f"[Bridge] session={session_id} local closed ({e.code}); stop upstream→local",
+                            flush=True,
+                        )
+                        await end_session("ConnectionClosed on bin send")
+                        break
                     except Exception:
-                        print("[Bridge] to_local_client bin send failed")
+                        print(f"[Bridge] session={session_id} to_local_client bin send failed")
                         print(traceback.format_exc())
-                        return
+                        await end_session("bin send exception")
+                        break
 
         try:
-            await asyncio.gather(from_local_client(), to_local_client())
+            t_in = asyncio.create_task(from_local_client())
+            t_out = asyncio.create_task(to_local_client())
+            done, pending = await asyncio.wait(
+                {t_in, t_out},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(t_in, t_out, return_exceptions=True)
+            await end_session("bridge tasks joined")
         finally:
-            await browser.close()
+            await _safe_close_playwright(page, context, browser)
+
+    print(f"[Bridge] session={session_id} browser closed", flush=True)
 
 
 async def main():
@@ -298,6 +464,8 @@ async def main():
     args = parser.parse_args()
 
     async def handler(ws, *rest):
+        peer = getattr(ws, "remote_address", None)
+        print(f"[Bridge] local TCP/WebSocket peer={peer}", flush=True)
         try:
             await bridge_handler(ws, args.target_url, proxy_url=args.proxy_url)
         except Exception as e:

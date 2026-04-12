@@ -465,6 +465,25 @@ _PW_BRIDGE_PROC = None
 _PW_BRIDGE_PORT = None
 
 
+def _stop_playwright_bridge():
+    """إيقاف عملية الجسر القديمة — كل login/WS جديد يجب أن يستخدم منفذاً وجلسة جديدة."""
+    global _PW_BRIDGE_PROC, _PW_BRIDGE_PORT
+    proc = _PW_BRIDGE_PROC
+    _PW_BRIDGE_PROC = None
+    _PW_BRIDGE_PORT = None
+    if proc is None or proc.poll() is not None:
+        return
+    log.info("Playwright bridge: إيقاف جلسة الجسر السابقة قبل إنشاء جلسة جديدة")
+    try:
+        proc.terminate()
+        proc.wait(timeout=8)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
 def _pick_free_port() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
@@ -501,8 +520,8 @@ def _ensure_playwright_bridge(target_ws_url: str):
     if not os.path.isfile(bridge_file):
         log.warning("Playwright bridge file غير موجود: %s", bridge_file)
         return None
-    if _PW_BRIDGE_PROC is not None and _PW_BRIDGE_PROC.poll() is None and _PW_BRIDGE_PORT:
-        return f"ws://127.0.0.1:{_PW_BRIDGE_PORT}"
+    # لا إعادة استخدام منفذ/عملية قديمة: upstream قد يواصل إعادة الاتصال بينما pyquotex على جلسة محلية جديدة
+    _stop_playwright_bridge()
 
     port = _pick_free_port()
     # systemd غالباً لا يضع `python` في PATH — بدون الجسر يبقى WS مباشر وCloudflare يرد 403 challenge.
