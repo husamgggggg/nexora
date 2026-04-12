@@ -483,6 +483,16 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                 f"[Bridge] target page not ready before upstream connect ({page_ready_err}) | timeout_ms={page_ready_timeout}",
                 flush=True,
             )
+        try:
+            page_settle_delay_ms = int(
+                os.environ.get("QUOTEX_BRIDGE_PAGE_SETTLE_DELAY_MS", "3000") or 3000
+            )
+        except ValueError:
+            page_settle_delay_ms = 3000
+        page_settle_delay_ms = max(0, min(page_settle_delay_ms, 30000))
+        if page_settle_delay_ms:
+            await asyncio.sleep(page_settle_delay_ms / 1000.0)
+            print(f"[Bridge] target page settle delay done | delay_ms={page_settle_delay_ms}", flush=True)
         await _wait_bridge_runtime_ready(page)
         await page.evaluate("(targetUrl) => window.__connectTarget(targetUrl)", target_url)
         try:
