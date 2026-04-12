@@ -432,16 +432,29 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                     print(f"[Bridge] about:blank fallback failed: {blank_err}", flush=True)
         await _wait_bridge_runtime_ready(page)
         await page.evaluate("(targetUrl) => window.__connectTarget(targetUrl)", target_url)
+        try:
+            upstream_open_timeout = float(
+                os.environ.get("QUOTEX_BRIDGE_UPSTREAM_OPEN_TIMEOUT_SEC", "35") or 35
+            )
+        except ValueError:
+            upstream_open_timeout = 35.0
+        upstream_open_timeout = max(5.0, min(upstream_open_timeout, 120.0))
 
         async def from_local_client():
             async for msg in client_ws:
                 try:
                     if not upstream_open.is_set():
                         try:
-                            await asyncio.wait_for(upstream_open.wait(), timeout=8.0)
-                            print("[Bridge] upstream ready; releasing local queued traffic", flush=True)
+                            await asyncio.wait_for(upstream_open.wait(), timeout=upstream_open_timeout)
+                            print(
+                                f"[Bridge] upstream ready; releasing local queued traffic | wait_sec={upstream_open_timeout:g}",
+                                flush=True,
+                            )
                         except asyncio.TimeoutError:
-                            print("[Bridge] upstream open timeout before local send", flush=True)
+                            print(
+                                f"[Bridge] upstream open timeout before local send | wait_sec={upstream_open_timeout:g}",
+                                flush=True,
+                            )
                             return
                     await _wait_bridge_runtime_ready(page, timeout_ms=5000)
                     if isinstance(msg, (bytes, bytearray)):
