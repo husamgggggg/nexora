@@ -258,6 +258,44 @@ async def _wait_bridge_runtime_ready(page: Any, timeout_ms: int = 15000) -> None
         raise
 
 
+async def _wait_target_page_ready(page: Any, timeout_ms: int = 25000) -> None:
+    try:
+        await page.wait_for_function(
+            """
+            () => {
+              const href = String(location.href || "");
+              const rs = String(document.readyState || "");
+              const txt = String(document.body?.innerText || "").slice(0, 4000);
+              const html = String(document.documentElement?.innerHTML || "").slice(0, 12000);
+              const challenge =
+                href.startsWith("chrome-error://") ||
+                txt.includes("Just a moment") ||
+                txt.includes("Enable JavaScript and cookies to continue") ||
+                html.includes("__cf_chl_opt");
+              return (rs === "interactive" || rs === "complete") && !challenge;
+            }
+            """,
+            timeout=timeout_ms,
+        )
+    except Exception:
+        try:
+            state = await page.evaluate(
+                """
+                () => ({
+                  href: String(location.href || ""),
+                  readyState: String(document.readyState || ""),
+                  title: String(document.title || ""),
+                  bodyText: String(document.body?.innerText || "").slice(0, 300),
+                  hasCfChallenge: String(document.documentElement?.innerHTML || "").includes("__cf_chl_opt"),
+                })
+                """
+            )
+            print(f"[Bridge] target page readiness snapshot: {state}", flush=True)
+        except Exception as snap_err:
+            print(f"[Bridge] target page readiness snapshot failed: {snap_err}", flush=True)
+        raise
+
+
 _BRIDGE_RUNTIME_JS = r"""
 (() => {
   if (window.__bridgeRuntimeInstalled) {
@@ -414,6 +452,13 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
         except ValueError:
             nav_timeout = 90000
         nav_timeout = max(5000, min(nav_timeout, 300000))
+        try:
+            page_ready_timeout = int(
+                os.environ.get("QUOTEX_BRIDGE_PAGE_READY_TIMEOUT_MS", "25000") or 25000
+            )
+        except ValueError:
+            page_ready_timeout = 25000
+        page_ready_timeout = max(3000, min(page_ready_timeout, 180000))
         if skip_nav or not nav_url:
             await page.goto("about:blank")
             print("[Bridge] page: about:blank (skip nav أو URL فارغ)", flush=True)
@@ -430,6 +475,14 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                     await page.goto("about:blank", wait_until="commit", timeout=5000)
                 except Exception as blank_err:
                     print(f"[Bridge] about:blank fallback failed: {blank_err}", flush=True)
+        try:
+            await _wait_target_page_ready(page, timeout_ms=page_ready_timeout)
+            print(f"[Bridge] target page ready | timeout_ms={page_ready_timeout}", flush=True)
+        except Exception as page_ready_err:
+            print(
+                f"[Bridge] target page not ready before upstream connect ({page_ready_err}) | timeout_ms={page_ready_timeout}",
+                flush=True,
+            )
         await _wait_bridge_runtime_ready(page)
         await page.evaluate("(targetUrl) => window.__connectTarget(targetUrl)", target_url)
         try:
