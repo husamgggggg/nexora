@@ -154,7 +154,7 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .sr:last-child{border-bottom:none;}
 .sr:active{background:var(--g3);}
 .slb{font-size:11px;color:var(--mu3);}
-.sv{font-size:14px;font-weight:900;display:flex;align-items:center;gap:5px;color:var(--tx);}
+.sv{font-size:14px;font-weight:900;display:flex;align-items:center;gap:5px;color:var(--tx);min-width:0;flex:1;}
 .irow{background:var(--card);margin:0 14px 10px;border-radius:14px;border:1px solid var(--br);overflow:hidden;}
 .iitem{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--br);}
 .iitem:last-child{border-bottom:none;}
@@ -274,6 +274,12 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .oi-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
 .oi-main{display:flex;align-items:center;gap:8px;min-width:0;}
 .oi-flag{width:16px;height:12px;border-radius:2px;object-fit:cover;border:1px solid rgba(255,255,255,.14);display:block;}
+.vAsset-bar{min-width:0;flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:4px 5px;font-size:11px;font-weight:800;line-height:1.25;color:var(--tx);}
+.vaf-chip{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%;}
+.vaf-flags{display:inline-flex;align-items:center;gap:2px;flex-shrink:0;}
+.vaf-f{width:14px;height:10px;border-radius:2px;}
+.vaf-sep{color:var(--mu3);font-weight:800;padding:0 1px;flex-shrink:0;}
+.vaf-txt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:7.5rem;}
 .oi-name{font-size:13px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .oi-rate{font-size:11px;color:var(--or);font-weight:900;}
 .oi-check{font-size:14px;color:transparent;font-weight:900;min-width:16px;text-align:left;}
@@ -544,7 +550,7 @@ h1{font-size:18px;}
   </div>
   <div class="sl">الإعدادات</div>
   <div class="sc">
-    <div class="sr" onclick="om('assets')"><div class="sv"><span id="vAsset" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">EURUSD OTC</span><span class="ch">‹</span></div><div class="slb">الأزواج المختارة</div></div>
+    <div class="sr" onclick="om('assets')"><div class="sv"><span id="vAsset" class="vAsset-bar">EURUSD OTC</span><span class="ch">‹</span></div><div class="slb">الأزواج المختارة</div></div>
     <div class="sr" onclick="om('strategy')"><div class="sv"><span id="vStrat">NEXORA</span><span class="ch">‹</span></div><div class="slb">الاستراتيجية</div></div>
   </div>
   <div class="sl">المبلغ والحدود</div>
@@ -689,7 +695,7 @@ const DEFAULT_ASSETS_OTC=['EURUSD_otc','GBPUSD_otc','AUDUSD_otc','USDJPY_otc','E
 const DEFAULT_ASSETS_LIVE=['EURUSD','GBPUSD','AUDUSD','USDJPY','EURJPY','GBPJPY','AUDCAD','USDCAD','EURGBP','EURAUD','GBPAUD','NZDUSD'];
 const DEFAULT_ASSETS=[...DEFAULT_ASSETS_OTC,...DEFAULT_ASSETS_LIVE];
 const ASSETS_REFRESH_INTERVAL_MS=10*60*1000;
-const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetsQuotexSynced:false,assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0};
+const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetsAwaitingQuotex:false,assetsQuotexSynced:false,assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0};
 const MAX_ASSETS=3;
 const PAIR_FLAGS={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz'};
 DEFAULT_ASSETS.forEach(a=>{
@@ -699,6 +705,8 @@ DEFAULT_ASSETS.forEach(a=>{
 });
 function getAvailableAssets(kind){
   const arr=s.availableAssets&&Array.isArray(s.availableAssets[kind])?s.availableAssets[kind]:[];
+  /* وضع Quotex الحقيقي: لا تعرض DEFAULT أثناء انتظار /api/assets — يمنع ظهور أزواج غير مفتوحة */
+  if(s.assetsAwaitingQuotex&&!s.assetsQuotexSynced)return arr;
   if(s.assetsQuotexSynced)return arr;
   if(arr.length>0)return arr;
   return kind==='otc'?[...DEFAULT_ASSETS_OTC]:[...DEFAULT_ASSETS_LIVE];
@@ -706,6 +714,8 @@ function getAvailableAssets(kind){
 function getAvailableAssetSet(){
   if(s.assetsQuotexSynced&&s.availableAssets&&Array.isArray(s.availableAssets.all))
     return new Set(s.availableAssets.all);
+  if(s.assetsAwaitingQuotex&&!s.assetsQuotexSynced)
+    return new Set(Array.isArray(s.availableAssets?.all)?s.availableAssets.all:[]);
   const all=(s.availableAssets&&Array.isArray(s.availableAssets.all)&&s.availableAssets.all.length>0)
     ?s.availableAssets.all
     :[...DEFAULT_ASSETS];
@@ -735,14 +745,40 @@ async function refreshAvailableAssets(notify){
     live:Array.isArray(a.live)?a.live:[],
     all:all
   };
-  if(d.from_quotex===true)s.assetsQuotexSynced=true;
+  if(d.from_quotex===true){
+    s.assetsQuotexSynced=true;
+    s.assetsAwaitingQuotex=false;
+  }
   if(d.payouts&&typeof d.payouts==='object')Object.assign(s.assetPayout,d.payouts);
   s.lastAssetsSyncAt=Date.now();
   sanitizeSelectedAssets(!!notify);
 }
+let _quotexAssetRetryTimers=[];
+function clearQuotexAssetRetryTimers(){
+  _quotexAssetRetryTimers.forEach(t=>clearTimeout(t));
+  _quotexAssetRetryTimers=[];
+}
+function setRealQuotexAssetsPending(){
+  s.assetsAwaitingQuotex=true;
+  s.assetsQuotexSynced=false;
+  s.availableAssets={otc:[],live:[],all:[]};
+  sanitizeSelectedAssets(false);
+}
+function scheduleQuotexAssetRefreshRetries(){
+  clearQuotexAssetRetryTimers();
+  if(s.sim||!s.token)return;
+  const delays=[600,2000,5000,12000,25000,45000];
+  delays.forEach(ms=>{
+    _quotexAssetRetryTimers.push(setTimeout(()=>{
+      if(s.sim||!s.token)return;
+      refreshAvailableAssets(false);
+    },ms));
+  });
+}
 let assetsInitTimer=null;
 function scheduleAssetsRefreshAfterLogin(){
   if(assetsInitTimer){clearTimeout(assetsInitTimer);assetsInitTimer=null;}
+  if(s.sim||!s.token)return;
   assetsInitTimer=setTimeout(()=>{
     assetsInitTimer=null;
     refreshAvailableAssets(true);
@@ -775,6 +811,17 @@ function renderPairOption(asset){
     ?`<img class="oi-flag" src="https://flagcdn.com/w20/${b}.png" alt="${b}"><img class="oi-flag" src="https://flagcdn.com/w20/${q}.png" alt="${q}">`
     :'';
   return `<div class="oi-row"><div class="oi-main"><span class="oi-check">✓</span></div><div class="oi-main"><span class="oi-name">${pairLabel(asset)}</span>${flags}</div></div>`;
+}
+function escHtml(t){
+  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function renderAssetLabelChip(asset){
+  if(!asset)return '';
+  const [b,q]=pairFlags(asset);
+  const flags=(b!=='un'&&q!=='un')
+    ?`<span class="vaf-flags"><img class="oi-flag vaf-f" src="https://flagcdn.com/w20/${b}.png" alt=""><img class="oi-flag vaf-f" src="https://flagcdn.com/w20/${q}.png" alt=""></span>`
+    :'';
+  return `<span class="vaf-chip">${flags}<span class="vaf-txt">${escHtml(pairLabel(asset))}</span></span>`;
 }
 async function api(path,method='GET',body=null){
   const url='/api'+path;
@@ -878,12 +925,15 @@ function afterLogin(d){
   s.email=d.email;s.uid='#'+d.user_id;s.rBal=d.real_balance||0;s.dBal=d.demo_balance||0;s.currency=d.currency||'USD';
   document.getElementById('hId').textContent=s.uid;document.getElementById('hEm').textContent=s.email;document.getElementById('dEm').textContent=s.email;
   document.getElementById('pinBox').style.display='none';document.getElementById('loginBox').style.display='block';
+  if(!s.sim){setRealQuotexAssetsPending();scheduleQuotexAssetRefreshRetries();}
+  else{s.assetsAwaitingQuotex=false;}
   updBals();toast('✅ مرحباً بك في نيكسورا تريد','ok');go('sBot',2);scheduleAssetsRefreshAfterLogin();if(!s.sim)startPoll();
 }
 async function doLogout(){
   if(assetsInitTimer){clearTimeout(assetsInitTimer);assetsInitTimer=null;}
+  clearQuotexAssetRetryTimers();
   doStop();clearInterval(s.pollInt);if(s.token)await api('/logout','POST',{token:s.token});
-  s.token='';s.email='';s.running=false;s.assetsQuotexSynced=false;
+  s.token='';s.email='';s.running=false;s.assetsQuotexSynced=false;s.assetsAwaitingQuotex=false;
   s.availableAssets={otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]};
   localStorage.removeItem('at_email');go('sReg',-1);toast('تم تسجيل الخروج','');
 }
@@ -1163,9 +1213,14 @@ document.addEventListener('input',e=>{
   if(e.target.id==='iSL'&&s.sOn)document.getElementById('slDesc').textContent=`يوقف عند -${e.target.value}`;
 });
 function updAssetLabel(){
-  const arr=s.assets.length>0?s.assets:[s.asset];
-  const txt=arr.filter(Boolean).map(a=>a.replace('_otc',' OTC')).join(' · ');
-  document.getElementById('vAsset').textContent=txt||'لا يوجد زوج متاح';
+  const el=document.getElementById('vAsset');
+  if(!el)return;
+  const arr=(s.assets.length>0?s.assets:[s.asset]).filter(Boolean);
+  if(arr.length===0){
+    el.textContent=s.assetsAwaitingQuotex&&!s.assetsQuotexSynced?'… جاري جلب الأزواج من المنصة':'لا يوجد زوج متاح';
+    return;
+  }
+  el.innerHTML=arr.map(renderAssetLabelChip).join('<span class="vaf-sep"> / </span>');
 }
 function om(key){
   if(key==='assets'){
@@ -1176,9 +1231,13 @@ function om(key){
     const liveAssets=getAvailableAssets('live');
     if(otcAssets.length===0&&liveAssets.length===0){
       const msg=document.createElement('div');
-      msg.style.cssText='padding:12px 4px;color:var(--tx2);font-size:13px;font-weight:700;';
-      msg.textContent='لا يوجد أزواج مفتوحة حالياً. جرّب بعد قليل.';
+      msg.style.cssText='padding:16px 8px;color:var(--tx2);font-size:13px;font-weight:700;text-align:center;line-height:1.65;white-space:pre-line;';
+      msg.textContent=s.assetsAwaitingQuotex&&!s.assetsQuotexSynced
+        ?'جاري جلب الأزواج المفتوحة من Quotex…\nأعد فتح القائمة بعد قليل إن استمرت فارغة.'
+        :'لا يوجد أزواج مفتوحة حالياً. جرّب بعد قليل.';
       list.appendChild(msg);
+      document.getElementById('mbg').classList.add('on');
+      return;
     }
     const h1=document.createElement('div');h1.style.cssText='font-size:10px;color:var(--gold);font-weight:700;padding:4px 2px 8px;letter-spacing:1px;';h1.textContent='── OTC ──';list.appendChild(h1);
     otcAssets.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
@@ -1255,6 +1314,8 @@ if(_em){
         document.getElementById('dEm').textContent=s.email;
         updBals();updStats();
         if(s.running){document.getElementById('stBtn').textContent='إيقاف البوت';document.getElementById('stBtn').classList.add('stop');}
+        if(!s.sim){setRealQuotexAssetsPending();scheduleQuotexAssetRefreshRetries();}
+        else{s.assetsAwaitingQuotex=false;}
         go('sBot',2);scheduleAssetsRefreshAfterLogin();if(!s.sim)startPoll();
         toast('✅ تم استعادة جلستك','ok');
       }else{go('sLogin',-1);}
