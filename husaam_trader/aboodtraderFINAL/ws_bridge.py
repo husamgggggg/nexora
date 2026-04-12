@@ -296,6 +296,69 @@ async def _wait_target_page_ready(page: Any, timeout_ms: int = 25000) -> None:
         raise
 
 
+def _attach_playwright_ws_debug(ws_obj: Any, match_predicate) -> None:
+    try:
+        url_text = str(ws_obj.url)
+    except Exception:
+        url_text = ""
+    is_target = False
+    try:
+        is_target = bool(match_predicate(url_text))
+    except Exception:
+        is_target = False
+    tag = "TARGET" if is_target else "OTHER"
+    print(f"[Bridge][PW] websocket {tag} created | url={url_text or '-'}", flush=True)
+
+    def _safe_payload(event: Any) -> str:
+        try:
+            payload = getattr(event, "payload", event)
+            text = str(payload)
+        except Exception:
+            text = "<unreadable>"
+        return text[:220]
+
+    try:
+        ws_obj.on(
+            "framereceived",
+            lambda event: print(
+                f"[Bridge][PW] websocket {tag} recv | url={url_text or '-'} | payload={_safe_payload(event)}",
+                flush=True,
+            ),
+        )
+    except Exception:
+        pass
+    try:
+        ws_obj.on(
+            "framesent",
+            lambda event: print(
+                f"[Bridge][PW] websocket {tag} sent | url={url_text or '-'} | payload={_safe_payload(event)}",
+                flush=True,
+            ),
+        )
+    except Exception:
+        pass
+    try:
+        ws_obj.on(
+            "socketerror",
+            lambda err: print(
+                f"[Bridge][PW] websocket {tag} error | url={url_text or '-'} | err={err}",
+                flush=True,
+            ),
+        )
+    except Exception:
+        pass
+    try:
+        ws_obj.on(
+            "close",
+            lambda *_: print(
+                f"[Bridge][PW] websocket {tag} close | url={url_text or '-'}",
+                flush=True,
+            ),
+        )
+    except Exception:
+        pass
+
+
 _BRIDGE_RUNTIME_JS = r"""
 (() => {
   if (window.__bridgeRuntimeInstalled) {
@@ -521,6 +584,27 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
         await context.add_init_script(_BRIDGE_RUNTIME_JS)
         page = await context.new_page()
         await page.add_init_script(_BRIDGE_RUNTIME_JS)
+        try:
+            target_host = urllib.parse.urlparse(target_url).hostname or ""
+        except Exception:
+            target_host = ""
+
+        def _ws_matches_target(url_text: str) -> bool:
+            s = str(url_text or "")
+            if not s:
+                return False
+            try:
+                u = urllib.parse.urlparse(s)
+                if target_host and (u.hostname or "") == target_host:
+                    return True
+            except Exception:
+                pass
+            return "qxbroker.com" in s or "/socket.io/" in s
+
+        page.on(
+            "websocket",
+            lambda ws: _attach_playwright_ws_debug(ws, _ws_matches_target),
+        )
         async def emit_to_python(payload):
             """payload من JS: {k:'t', d: str} أو {k:'b', d: base64}"""
             try:
