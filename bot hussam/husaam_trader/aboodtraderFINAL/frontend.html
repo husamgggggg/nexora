@@ -235,13 +235,89 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 .stc:nth-child(2)::before{background:linear-gradient(90deg,var(--g),var(--cyan));}
 .stc:nth-child(3)::before{background:linear-gradient(90deg,var(--g),var(--g2));}
 .stc:nth-child(4)::before{background:linear-gradient(90deg,var(--r),var(--r2));}
-.stl{font-size:13px;color:var(--mu3);margin-bottom:8px;letter-spacing:1.2px;font-weight:900;text-transform:uppercase;}
+.stl{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-bottom:10px;
+  min-height:34px;
+}
+.stl-txt{
+  flex:1;
+  min-width:0;
+  font-size:11px;
+  line-height:1.35;
+  letter-spacing:1.1px;
+  font-weight:900;
+  text-transform:uppercase;
+  color:var(--mu3);
+}
+.stl-ic{
+  width:32px;
+  height:32px;
+  border-radius:10px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex-shrink:0;
+  border:1px solid rgba(255,255,255,.09);
+  box-shadow:0 2px 12px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.05);
+  color:var(--tx);
+}
+.stl-ic svg{
+  width:17px;
+  height:17px;
+  stroke:currentColor;
+  fill:none;
+  stroke-width:1.85;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  vector-effect:non-scaling-stroke;
+}
+.stl-ic--bars{
+  background:linear-gradient(155deg,rgba(77,183,255,.26),rgba(41,121,255,.09));
+  border-color:rgba(103,168,255,.35);
+  color:#7ec8ff;
+  box-shadow:0 0 16px rgba(77,183,255,.12),0 2px 12px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.06);
+}
+.stl-ic--pie{
+  background:linear-gradient(155deg,rgba(0,212,255,.22),rgba(0,212,255,.06));
+  border-color:rgba(0,212,255,.32);
+  color:var(--cyan);
+  box-shadow:0 0 18px rgba(0,212,255,.14),0 2px 12px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.06);
+}
+.stl-ic--win{
+  background:linear-gradient(155deg,rgba(0,229,160,.22),rgba(0,192,128,.08));
+  border-color:rgba(0,229,160,.32);
+  color:var(--g);
+  box-shadow:0 0 16px rgba(0,229,160,.12),0 2px 12px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.06);
+}
+.stl-ic--loss{
+  background:linear-gradient(155deg,rgba(255,64,96,.2),rgba(204,32,64,.08));
+  border-color:rgba(255,64,96,.32);
+  color:#ff6b84;
+  box-shadow:0 0 16px rgba(255,64,96,.12),0 2px 12px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.05);
+}
+.stl-ic--pl{
+  background:linear-gradient(155deg,rgba(224,184,64,.2),rgba(0,200,180,.1));
+  border-color:rgba(224,184,64,.28);
+  color:#5ee6cf;
+  box-shadow:0 0 18px rgba(224,184,64,.1),0 2px 12px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.05);
+}
+.pbar-lbl-row{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  min-width:0;
+  flex:1;
+}
+.pbar-lbl-row .pbar-label{flex:1;min-width:0;line-height:1.35;}
 .stv{font-size:26px;font-weight:900;}
 .stv.g{color:var(--tx)!important;}
 .stv.r{color:var(--r);}
 .stv.b{color:var(--bl);}
 .pbar-wrap{margin:0 14px 10px;background:var(--card);border:1px solid var(--br);border-radius:14px;padding:14px;}
-.pbar-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+.pbar-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;}
 .pbar-label{font-size:13px;color:var(--mu3);font-weight:900;}
 .pbar-val{font-size:15px;font-weight:900;}
 .pbar-val.g{color:var(--tx)!important;}
@@ -406,6 +482,9 @@ body{
 .stc:nth-child(3)::before{background:linear-gradient(90deg,var(--cyan),var(--g));}
 .stc:nth-child(4)::before{background:linear-gradient(90deg,var(--r),var(--r2));}
 .stv{font-size:28px;}
+.stl-txt{font-size:12px;letter-spacing:1.2px;}
+.stl-ic{width:34px;height:34px;border-radius:11px;}
+.stl-ic svg{width:18px;height:18px;}
 .pbar{height:9px;background:#22314a;}
 .tlh{padding:15px 16px;}.tli{padding:13px 16px;}.tli:hover{background:rgba(255,255,255,.02);}
 .tld.up{background:rgba(34,197,139,.1);border-color:rgba(34,197,139,.18);}.tld.dn{background:rgba(239,91,108,.1);border-color:rgba(239,91,108,.18);}
@@ -456,11 +535,6 @@ body{
   color:var(--tx);
 }
 .g{color:var(--tx)!important;}
-.stl svg{
-  vertical-align:-3px;
-  margin-left:6px;
-  opacity:.95;
-}
 h2{font-size:18px;}
 h1{font-size:18px;}
 @media (max-width:420px){.scr{padding-bottom:82px;}.hero-title{font-size:27px;}.ba{font-size:21px;}}
@@ -604,21 +678,15 @@ h1{font-size:18px;}
   <div class="sgrd">
     <div class="stc">
       <div class="stl">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 1v22"></path>
-          <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H7"></path>
-        </svg>
-        <span id="stTotLbl">إجمالي الصفقات</span>
+        <span class="stl-ic stl-ic--bars" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 18V9"/><path d="M9 18v-5"/><path d="M14 18V6"/><path d="M19 18v-9"/></svg></span>
+        <span class="stl-txt" id="stTotLbl">إجمالي الصفقات</span>
       </div>
       <div class="stv b" id="sTot">0</div>
     </div>
     <div class="stc">
       <div class="stl">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 20h9"></path>
-          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
-        </svg>
-        <span id="stWinLbl">نسبة الفوز</span>
+        <span class="stl-ic stl-ic--pie" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span>
+        <span class="stl-txt" id="stWinLbl">نسبة الفوز</span>
       </div>
       <div class="ringWinWrap">
         <div class="ringValAbove stv g" id="sRat">0%</div>
@@ -627,26 +695,27 @@ h1{font-size:18px;}
     </div>
     <div class="stc">
       <div class="stl">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M20 6 9 17l-5-5"></path>
-        </svg>
-        <span id="stWinsLbl">الصفقات الرابحة</span>
+        <span class="stl-ic stl-ic--win" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg></span>
+        <span class="stl-txt" id="stWinsLbl">الصفقات الرابحة</span>
       </div>
       <div class="stv g" id="sWin">0</div>
     </div>
     <div class="stc">
       <div class="stl">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 6 6 18"></path>
-          <path d="M6 6l12 12"></path>
-        </svg>
-        <span id="stLossLbl">الصفقات الخاسرة</span>
+        <span class="stl-ic stl-ic--loss" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg></span>
+        <span class="stl-txt" id="stLossLbl">الصفقات الخاسرة</span>
       </div>
       <div class="stv r" id="sLos">0</div>
     </div>
   </div>
   <div class="pbar-wrap">
-    <div class="pbar-top"><span class="pbar-label" id="pbarLbl">ربح / خسارة الجلسة</span><span class="pbar-val" id="sPrf" style="color:var(--mu3)">0.00</span></div>
+    <div class="pbar-top">
+      <div class="pbar-lbl-row">
+        <span class="stl-ic stl-ic--pl" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+        <span class="pbar-label" id="pbarLbl">ربح / خسارة الجلسة</span>
+      </div>
+      <span class="pbar-val" id="sPrf" style="color:var(--mu3)">0.00</span>
+    </div>
     <div class="pbar"><div class="pbar-fill" id="sPrfBar" style="width:50%;background:var(--mu)"></div></div>
   </div>
   <!-- سجل الصفقات تم إزالته بناءً على طلبك -->
@@ -1342,7 +1411,8 @@ function cm(e,force){if(force||(e&&e.target===document.getElementById('mbg')))do
 function syncBottomNavActive(idx){
   if(idx==null||idx<0)return;
   document.querySelectorAll('.scr > .nav').forEach(nav=>{
-    nav.querySelectorAll(':scope > .ni').forEach((el,i)=>el.classList.toggle('on',i===idx));
+    const items=[...nav.children].filter(el=>el.classList&&el.classList.contains('ni'));
+    items.forEach((el,i)=>el.classList.toggle('on',i===idx));
   });
 }
 function go(id,idx){
