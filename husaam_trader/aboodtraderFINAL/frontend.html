@@ -390,9 +390,79 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
 }
 .trade-pop.on{opacity:1;transform:translate(50%,50%) scale(1);}
 .sn{background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.15);border-radius:11px;padding:10px 13px;font-size:11px;color:var(--or);line-height:1.8;text-align:center;margin:0 14px 10px;}
-.sup-item{background:var(--card);border:1px solid var(--br);border-radius:13px;padding:14px 16px;font-size:14px;color:var(--tx);cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:10px;font-weight:900;}
+.sup-item{
+  background:var(--card);
+  border:1px solid var(--br);
+  border-radius:14px;
+  padding:14px 16px;
+  font-size:14px;
+  color:var(--tx);
+  cursor:pointer;
+  transition:background .2s, border-color .2s, box-shadow .2s;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  font-weight:900;
+  text-align:right;
+}
 .sup-item:active{background:var(--g3);}
-.sup-icon{font-size:18px;flex-shrink:0;}
+.sup-lbl{flex:1;min-width:0;line-height:1.45;}
+.sup-icon{
+  width:38px;
+  height:38px;
+  border-radius:12px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-shrink:0;
+  border:1px solid rgba(255,255,255,.1);
+  box-shadow:
+    0 2px 14px rgba(0,0,0,.28),
+    0 0 22px rgba(77,183,255,.07),
+    inset 0 1px 0 rgba(255,255,255,.06);
+  color:var(--cyan);
+}
+.sup-icon svg{
+  width:19px;
+  height:19px;
+  stroke:currentColor;
+  fill:none;
+  stroke-width:1.85;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  vector-effect:non-scaling-stroke;
+}
+.sup-icon--start{
+  background:linear-gradient(155deg,rgba(77,183,255,.24),rgba(0,212,255,.1));
+  border-color:rgba(103,168,255,.32);
+  color:#7ec8ff;
+  box-shadow:0 2px 14px rgba(0,0,0,.28),0 0 24px rgba(77,183,255,.12),inset 0 1px 0 rgba(255,255,255,.06);
+}
+.sup-icon--wallet{
+  background:linear-gradient(155deg,rgba(224,184,64,.2),rgba(255,176,32,.08));
+  border-color:rgba(224,184,64,.3);
+  color:var(--gold);
+  box-shadow:0 2px 14px rgba(0,0,0,.28),0 0 22px rgba(224,184,64,.1),inset 0 1px 0 rgba(255,255,255,.05);
+}
+.sup-icon--target{
+  background:linear-gradient(155deg,rgba(0,229,160,.2),rgba(0,192,128,.08));
+  border-color:rgba(0,229,160,.28);
+  color:var(--g);
+  box-shadow:0 2px 14px rgba(0,0,0,.28),0 0 22px rgba(0,229,160,.1),inset 0 1px 0 rgba(255,255,255,.06);
+}
+.sup-icon--layers{
+  background:linear-gradient(155deg,rgba(128,96,255,.22),rgba(77,183,255,.1));
+  border-color:rgba(128,96,255,.3);
+  color:#a89cff;
+  box-shadow:0 2px 14px rgba(0,0,0,.28),0 0 22px rgba(128,96,255,.12),inset 0 1px 0 rgba(255,255,255,.05);
+}
+.sup-list{
+  margin:0 14px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.sup-list .sup-item{margin-left:0;margin-right:0;}
 </style>
 
 <style>
@@ -495,8 +565,9 @@ body{
 .toast{background:rgba(16,28,47,.96);border-radius:14px;padding:12px 18px;box-shadow:var(--shadow-lg);}
 .lvc{border-radius:26px;padding:26px 22px;}.lsub{letter-spacing:1.4px;}
 .sob{border-radius:14px;padding:14px 28px;background:rgba(239,91,108,.08);border-color:rgba(239,91,108,.2);}
-.sup-item{padding:15px 16px;border-radius:16px;gap:12px;}
-.sup-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(77,183,255,.08);border-radius:10px;color:var(--cyan);font-size:14px;}
+.sup-item{padding:15px 17px;border-radius:16px;gap:13px;}
+.sup-icon{width:40px;height:40px;border-radius:13px;}
+.sup-icon svg{width:20px;height:20px;}
 #sAcc .mni,#sBot .sc,#sBot .irow,#sBot .rc,#sSt .pbar-wrap,#sSt .tlog,#sSup .sup-item{margin-bottom:12px;}
 .ringWinWrap{display:flex;flex-direction:column;align-items:center;gap:6px;}
 .ringValAbove{
@@ -731,11 +802,23 @@ h1{font-size:18px;}
 <div id="sSup" class="scr">
   <div class="hdr"><div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main">الدعم</div></div></div>
   <div style="padding:18px 16px 12px"><div style="font-size:18px;font-weight:900;margin-bottom:4px">مركز المساعدة</div><div style="font-size:12px;color:var(--mu3)">الأسئلة الشائعة وإرشادات الاستخدام</div></div>
-  <div style="margin:0 14px;display:flex;flex-direction:column;gap:8px">
-    <div class="sup-item" onclick="openHelp('start')"><span class="sup-icon">🚀</span><span>كيف أبدأ التداول؟</span></div>
-    <div class="sup-item" onclick="openHelp('real_demo')"><span class="sup-icon">💰</span><span>ما الفرق بين الحساب الحقيقي والتجريبي؟</span></div>
-    <div class="sup-item" onclick="openHelp('profit_loss')"><span class="sup-icon">🎯</span><span>كيف أضبط هدف الربح وحد الخسارة؟</span></div>
-    <div class="sup-item" onclick="openHelp('multi_assets')"><span class="sup-icon">🔗</span><span>كيف أختار أكثر من زوج؟</span></div>
+  <div class="sup-list">
+    <div class="sup-item" onclick="openHelp('start')">
+      <span class="sup-icon sup-icon--start" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></span>
+      <span class="sup-lbl">كيف أبدأ التداول؟</span>
+    </div>
+    <div class="sup-item" onclick="openHelp('real_demo')">
+      <span class="sup-icon sup-icon--wallet" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg></span>
+      <span class="sup-lbl">ما الفرق بين الحساب الحقيقي والتجريبي؟</span>
+    </div>
+    <div class="sup-item" onclick="openHelp('profit_loss')">
+      <span class="sup-icon sup-icon--target" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+      <span class="sup-lbl">كيف أضبط هدف الربح وحد الخسارة؟</span>
+    </div>
+    <div class="sup-item" onclick="openHelp('multi_assets')">
+      <span class="sup-icon sup-icon--layers" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg></span>
+      <span class="sup-lbl">كيف أختار أكثر من زوج؟</span>
+    </div>
   </div>
   <div class="nav">
     <div class="ni" onclick="go('sAcc',0)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>الحساب</div>
