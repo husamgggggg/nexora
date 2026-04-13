@@ -1190,7 +1190,7 @@ function go(id,idx){
     next.style.transition='';
   },270);
 }
-let tT;function toast(msg,type){const el=document.getElementById('toastEl');el.textContent=msg;el.className='toast on '+(type||'');clearTimeout(tT);tT=setTimeout(()=>el.classList.remove('on'),4000);}
+let tT;function toast(msg,type){const el=document.getElementById('toastEl');el.textContent=msg;el.className='toast on '+(type||'');clearTimeout(tT);tT=setTimeout(()=>el.classList.remove('on'),10000);}
 
 // ── استعادة الجلسة تلقائياً ─────────────────────────────────
 const _em=localStorage.getItem('at_email');
