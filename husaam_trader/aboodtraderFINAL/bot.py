@@ -4052,7 +4052,7 @@ async def login(req: LoginReq):
             if blocked_region:
                 raise HTTPException(
                     403,
-                    "Quotex رفض اتصال WebSocket (غالباً حماية Cloudflare أو IP/منطقة). جرّب VPN أو شبكة أخرى، أو تشغيل البوت من مكان يصل فيه المتصفح إلى Quotex.",
+                    "خطأ حاول مرة أخرى خلال دقيقة",
                 )
             log.warning("login Quotex فشل: %s", msg[:500])
             raise HTTPException(401, msg)
