@@ -1,4 +1,4 @@
-# تطبيق Android (APK) — Abood Trader
+# تطبيق Android (APK) — Nexo Trade
 
 التطبيق **غلاف WebView** عبر [Capacitor](https://capacitorjs.com/) يفتح موقعك الحي من `server.url` في `capacitor.config.json` (افتراضيًا `https://aboodtrading.com`). غيّر الرابط إذا كان الدومين مختلفًا.
 

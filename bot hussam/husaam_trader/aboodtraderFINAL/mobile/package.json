@@ -2,7 +2,7 @@
   "name": "abood-trader-app",
   "version": "1.0.0",
   "private": true,
-  "description": "غلاف Android (Capacitor) لموقع Abood Trader",
+  "description": "غلاف Android (Capacitor) لـ Nexo Trade",
   "scripts": {
     "sync": "cap sync",
     "open:android": "cap open android"

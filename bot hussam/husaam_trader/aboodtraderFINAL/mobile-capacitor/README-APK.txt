@@ -1,5 +1,13 @@
-Abood Trader — بناء APK بدون دومين (Capacitor + WebView يفتح http://IP:8000)
+Nexo Trade — بناء APK بدون دومين (Capacitor + WebView يفتح http://IP:8000)
 ================================================================================
+
+0) آخر نسخة من المستودع
+   من جذر المشروع nexora:
+     git pull
+   ثم افتح مجلد mobile-capacitor (أو mobile) وتابع الخطوات أدناه. لا يوجد ملف APK جاهز
+   في Git — تبنيه محلياً بـ Android Studio. بعد Build → Build APK(s) يكون الملف عادة:
+     mobile-capacitor/android/app/build/outputs/apk/debug/app-debug.apk
+   (أو mobile/android/... بنفس المسار إذا استخدمت مجلد mobile)
 
 1) عدّل عنوان السيرفر
    افتح: capacitor.config.json
