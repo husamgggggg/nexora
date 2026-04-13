@@ -758,6 +758,12 @@ ADMIN_SETTINGS_F = "data/admin_settings.json"
 DEMO_DAILY_TRADES_F = "data/demo_daily_trades.json"
 # الحد الأدنى لتشغيل البوت على الحساب الحقيقي (USD)
 REAL_MIN_BALANCE_USD = 50.0
+# تسجيل خروج تلقائي إذا مرّ هذا الوقت والمستخدم لم يشغّل البوت
+try:
+    NO_BOT_AUTO_LOGOUT_SEC = int(os.getenv("NO_BOT_AUTO_LOGOUT_SEC", "3600") or 3600)
+except (TypeError, ValueError):
+    NO_BOT_AUTO_LOGOUT_SEC = 3600
+NO_BOT_AUTO_LOGOUT_SEC = max(300, min(NO_BOT_AUTO_LOGOUT_SEC, 7 * 24 * 3600))
 ADMIN_PW = os.getenv("ADMIN_PW", "Admin@2024")
 _ALLOWED_ORIGINS_RAW = os.getenv(
     "ALLOWED_ORIGINS",
@@ -1123,6 +1129,7 @@ def new_session(email=""):
         "candle_source":  "",   # HUSAAM_EMA10: مصدر الشموع للعرض
         "status_msg":     "",   # رسالة للمشترك
         "_last_bal_sync_ts": 0.0,
+        "_no_bot_since":  0.0,  # وقت آخر فترة بدون تشغيل البوت
         "login_error":    "",   # فشل connect بعد إرسال PIN (للعرض بدل مهلة صامتة)
     }
 
@@ -1131,6 +1138,59 @@ def _is_session_sim_mode(S: dict) -> bool:
     if not QX:
         return True
     return not bool(S and S.get("client"))
+
+
+def _touch_no_bot_timer(S: dict) -> None:
+    """يضبط مؤقت الخمول عندما يكون المستخدم مسجّلاً دخوله لكن البوت غير شغّال."""
+    if not S or not S.get("logged_in"):
+        return
+    if S.get("running"):
+        S["_no_bot_since"] = 0.0
+        return
+    if float(S.get("_no_bot_since", 0.0) or 0.0) <= 0:
+        S["_no_bot_since"] = time.time()
+
+
+def _auto_logout_if_no_bot_too_long(S: dict) -> bool:
+    """تسجيل خروج تلقائي بعد ساعة خمول بدون تشغيل البوت."""
+    if not S or not S.get("logged_in"):
+        return False
+    if S.get("running"):
+        S["_no_bot_since"] = 0.0
+        return False
+    _touch_no_bot_timer(S)
+    since = float(S.get("_no_bot_since", 0.0) or 0.0)
+    if since <= 0:
+        return False
+    if (time.time() - since) < float(NO_BOT_AUTO_LOGOUT_SEC):
+        return False
+
+    msg = "تم تسجيل خروجك تلقائياً بعد ساعة بدون تشغيل البوت. سجّل الدخول من جديد."
+    S["status_msg"] = ""
+    S["running"] = False
+    try:
+        _ux_session_close(S)
+    except Exception:
+        pass
+    if S.get("client"):
+        try:
+            run_async_for(S.get("email", "_"), _close(S["client"]), 5)
+        except Exception:
+            pass
+    S.update({
+        "logged_in": False,
+        "needs_pin": False,
+        "trades": [],
+        "wins": 0,
+        "losses": 0,
+        "session_profit": 0.0,
+        "current_trade": None,
+        "client": None,
+        "login_error": msg,
+        "_no_bot_since": 0.0,
+    })
+    log.info("🕒 Auto-logout (no bot activity): %s", S.get("email") or "_")
+    return True
 
 def get_session(token) -> dict:
     if not token: return None
@@ -3627,6 +3687,8 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
     S["running"] = False
     S["current_trade"] = None
+    if S.get("logged_in"):
+        S["_no_bot_since"] = time.time()
     log.info(f"🤖 توقف: {S['email']}")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -4008,6 +4070,7 @@ async def login(req: LoginReq):
             S.pop("_ux_session_id", None)
         S["real_balance"]=0.0; S["demo_balance"]=10_000.0; S["currency"]="USD"
     S["logged_in"]=True; S["needs_pin"]=False; S["email"]=email_key
+    S["_no_bot_since"] = time.time()
     S["status_msg"] = ""
     if not QX:
         _ux_session_open(S)
@@ -4030,6 +4093,7 @@ async def pin_ep(req: PinReq):
         raise HTTPException(400,"PIN قصير")
     if not QX:
         S["logged_in"]=True; S["needs_pin"]=False
+        S["_no_bot_since"] = time.time()
         if not S.get("_ux_session_id"):
             _ux_session_open(S)
         _pk = S.get("email") or ""
@@ -4064,13 +4128,15 @@ async def logout(req: TokenReq):
             try: run_async_for(S.get("email","_"), _close(S["client"]),5)
             except: pass
         S.update({"logged_in":False,"needs_pin":False,"login_error":"","trades":[],"wins":0,
-                  "losses":0,"session_profit":0.0,"current_trade":None,"client":None})
+                  "losses":0,"session_profit":0.0,"current_trade":None,"client":None,
+                  "_no_bot_since":0.0})
     return {"success":True}
 
 @app.post("/api/bot/start")
 async def start(req: BotReq):
     S = get_session(req.token)
     if not S: raise HTTPException(403,"جلسة غير صالحة")
+    _auto_logout_if_no_bot_too_long(S)
     if not S["logged_in"]: raise HTTPException(401,"سجّل الدخول أولاً")
     if S["running"]: raise HTTPException(400,"البوت يعمل بالفعل")
     if (req.account_type or "").lower() == "real":
@@ -4108,6 +4174,7 @@ async def start(req: BotReq):
     S["current_trade"]  = None
     S["candles_ok"]     = False
     S["candle_source"]  = ""
+    S["_no_bot_since"]  = 0.0
     threading.Thread(target=bot_worker, args=(req,S,S["stop_event"]),
                      daemon=True).start()
     return {"success":True}
@@ -4120,6 +4187,8 @@ async def stop_ep(req: TokenReq):
         S["running"] = False
         S["status_msg"] = ""
         S["candle_source"] = ""
+        if S.get("logged_in"):
+            S["_no_bot_since"] = time.time()
     return {"success":True}
 
 @app.get("/api/assets")
@@ -4128,6 +4197,7 @@ async def api_assets(token: str = ""):
     S = get_session(token)
     if not S:
         return {"success": False, "detail": "جلسة غير صالحة"}
+    _auto_logout_if_no_bot_too_long(S)
     if not S.get("logged_in"):
         return {"success": False, "detail": "سجّل الدخول أولاً"}
     if _is_session_sim_mode(S):
@@ -4156,6 +4226,8 @@ async def api_assets(token: str = ""):
 async def status(token: str=""):
     S = get_session(token)
     if not S: return {"logged_in":False,"running":False,"needs_pin":False,"login_error":""}
+    _auto_logout_if_no_bot_too_long(S)
+    _touch_no_bot_timer(S)
     # تحديث دوري للرصيدين من Quotex (لإظهار الرصيد الحقيقي حتى بدون تشغيل البوت).
     if QX and S.get("logged_in") and S.get("client"):
         now = time.time()
