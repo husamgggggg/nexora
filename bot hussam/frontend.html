@@ -643,7 +643,6 @@ h1{font-size:18px;}
     <div class="lm">
       <div class="lmi"><div class="lml">المبلغ</div><div class="lmv" id="lAmt">10</div></div>
       <div class="lmi"><div class="lml">الوقت</div><div class="lmv" id="lTmr">60s</div></div>
-      <div class="lmi"><div class="lml">الحساب</div><div class="lmv" id="lAcc">تجريبي</div></div>
     </div>
     <div class="pb2"><div class="pf2 up" id="lProg" style="width:100%"></div></div>
   </div>
@@ -917,7 +916,6 @@ function showLive(asset,dir,secs,tradeId=''){
   document.getElementById('lDir').textContent=isUp?'▲ شراء':'▼ بيع';
   document.getElementById('lDir').className='ld '+(isUp?'up':'dn');
   document.getElementById('lAmt').textContent=(document.getElementById('iAmt').value||10)+' '+s.currency;
-  document.getElementById('lAcc').textContent=s.acc==='real'?'حقيقي':'تجريبي';
   document.getElementById('lProg').style.width='100%';document.getElementById('lProg').className='pf2 '+(isUp?'up':'dn');
   let el=secs;clearInterval(pgInt);
   pgInt=setInterval(()=>{el--;document.getElementById('lTmr').textContent=el+'s';document.getElementById('lProg').style.width=(el/secs*100)+'%';if(el<=0)clearInterval(pgInt);},1000);
