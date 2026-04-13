@@ -1,0 +1,10 @@
+{
+  "appId": "com.aboodtrader.app",
+  "appName": "Nexo Trade",
+  "webDir": "www",
+  "server": {
+    "url": "https://aboodtrading.com",
+    "androidScheme": "https",
+    "cleartext": false
+  }
+}
