@@ -1425,10 +1425,10 @@ _HUSAAM_TRADE_UTC_START = 6
 _HUSAAM_TRADE_UTC_END = 23
 
 # ── PREMIUM PRO (advanced + variants) ───────────────────────────────────────
-_PREMIUM_PRO_MIN_BARS = 60
+_PREMIUM_PRO_MIN_BARS = 45
 _PREMIUM_PRO_SR_LOOKBACK = 30
-_PREMIUM_PRO_NEAR_SR_PCT = 0.0035
-_PREMIUM_PRO_ADV_MIN_CONFIRM = 4
+_PREMIUM_PRO_NEAR_SR_PCT = 0.0060
+_PREMIUM_PRO_ADV_MIN_CONFIRM = 3
 
 
 def _husaam_trade_window_ok_utc() -> bool:
@@ -1623,15 +1623,15 @@ def _analyze_premium_pro_signal(candles, mode: str = "advanced") -> tuple:
     pa_bear = _price_action_bearish(kit)
     macd_bull = macd_line[i] > signal_line[i] and macd_line[i] > 0 and hist[i] > 0
     macd_bear = macd_line[i] < signal_line[i] and macd_line[i] < 0 and hist[i] < 0
-    rsi_buy = 45 <= rsi <= 70
-    rsi_sell = 30 <= rsi <= 55
+    rsi_buy = 40 <= rsi <= 74
+    rsi_sell = 26 <= rsi <= 60
     ema_up = price > ema10 > ema20 > ema50
     ema_down = price < ema10 < ema20 < ema50
 
     mode = (mode or "advanced").strip().lower()
     if mode == "ema_support_bounce":
-        buy_ok = price > ema50 and price >= ema10 * (1 - _PREMIUM_PRO_NEAR_SR_PCT) and 40 <= rsi <= 68
-        sell_ok = price < ema50 and price <= ema10 * (1 + _PREMIUM_PRO_NEAR_SR_PCT) and 32 <= rsi <= 60
+        buy_ok = price > ema50 and price >= ema10 * (1 - _PREMIUM_PRO_NEAR_SR_PCT * 1.2) and 36 <= rsi <= 72
+        sell_ok = price < ema50 and price <= ema10 * (1 + _PREMIUM_PRO_NEAR_SR_PCT * 1.2) and 28 <= rsi <= 64
         if buy_ok and not sell_ok:
             return "call", 3
         if sell_ok and not buy_ok:
