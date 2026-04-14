@@ -963,8 +963,19 @@ function tickSimPayouts(){
   });
 }
 setInterval(tickSimPayouts, 9000);
-const STRATEGIES=[{key:'HUSAAM_EMA10',label:'PREMIUM'}];
-const STRAT_LABELS={HUSAAM_EMA10:'PREMIUM',HUSAAM:'PREMIUM'};
+const STRATEGIES=[
+  {key:'HUSAAM_EMA10',label:'PREMIUM'},
+  {key:'PREMIUM_PRO',label:'PREMIUM PRO'}
+];
+const STRAT_LABELS={
+  HUSAAM_EMA10:'PREMIUM',
+  HUSAAM:'PREMIUM',
+  PREMIUM_PRO:'PREMIUM PRO',
+  PREMIUM_PRO_ADVANCED:'PREMIUM PRO',
+  PREMIUM_PRO_EMA_SUPPORT_BOUNCE:'PREMIUM PRO',
+  PREMIUM_PRO_MACD_CROSSOVER:'PREMIUM PRO',
+  PREMIUM_PRO_PRICE_ACTION_SR:'PREMIUM PRO'
+};
 (function ensureStrategyKey(){
   if(!STRATEGIES.some(st=>st.key===s.strategy))s.strategy=STRATEGIES[0].key;
   const vs=document.getElementById('vStrat');if(vs)vs.textContent=STRAT_LABELS[s.strategy]||STRATEGIES[0].label;
