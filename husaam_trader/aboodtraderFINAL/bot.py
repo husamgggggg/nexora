@@ -1594,7 +1594,7 @@ def _nearest_support_resistance(kit, lookback: int) -> tuple:
 def _analyze_premium_pro_signal(candles, mode: str = "advanced") -> tuple:
     """
     modes:
-    - advanced (default): MACD + RSI + EMA trend + SR proximity + price action (>=4/5)
+    - advanced (default): Pullback + Momentum فقط
     - ema_support_bounce: EMA10 + EMA50 + RSI
     - macd_crossover: MACD crossover only
     - price_action_sr: price action + support/resistance proximity
@@ -1627,6 +1627,21 @@ def _analyze_premium_pro_signal(candles, mode: str = "advanced") -> tuple:
     rsi_sell = 26 <= rsi <= 60
     ema_up = price > ema10 > ema20 > ema50
     ema_down = price < ema10 < ema20 < ema50
+    # (2) Pullback: إعادة اختبار EMA10/EMA20 خلال آخر 3 شموع مع بقاء الاتجاه
+    last3 = kit[-3:]
+    pullback_buy = (
+        ema_up
+        and any(float(c["low"]) <= ema10 * (1 + _PREMIUM_PRO_NEAR_SR_PCT * 0.5) for c in last3)
+        and price >= ema10 * (1 - _PREMIUM_PRO_NEAR_SR_PCT * 0.35)
+    )
+    pullback_sell = (
+        ema_down
+        and any(float(c["high"]) >= ema10 * (1 - _PREMIUM_PRO_NEAR_SR_PCT * 0.5) for c in last3)
+        and price <= ema10 * (1 + _PREMIUM_PRO_NEAR_SR_PCT * 0.35)
+    )
+    # (3) Momentum: MACD + RSI
+    momentum_buy = macd_bull and rsi_buy
+    momentum_sell = macd_bear and rsi_sell
 
     mode = (mode or "advanced").strip().lower()
     if mode == "ema_support_bounce":
@@ -1656,12 +1671,13 @@ def _analyze_premium_pro_signal(candles, mode: str = "advanced") -> tuple:
             return "put", 2
         return "wait", 0
 
-    buy_confirm = int(macd_bull) + int(rsi_buy) + int(ema_up) + int(near_support) + int(pa_bull)
-    sell_confirm = int(macd_bear) + int(rsi_sell) + int(ema_down) + int(near_resistance) + int(pa_bear)
-    if buy_confirm >= _PREMIUM_PRO_ADV_MIN_CONFIRM and sell_confirm < _PREMIUM_PRO_ADV_MIN_CONFIRM:
-        return "call", buy_confirm
-    if sell_confirm >= _PREMIUM_PRO_ADV_MIN_CONFIRM and buy_confirm < _PREMIUM_PRO_ADV_MIN_CONFIRM:
-        return "put", sell_confirm
+    # advanced الافتراضي: يعتمد فقط على (2) Pullback و(3) Momentum
+    buy_ok = pullback_buy and momentum_buy
+    sell_ok = pullback_sell and momentum_sell
+    if buy_ok and not sell_ok:
+        return "call", 2
+    if sell_ok and not buy_ok:
+        return "put", 2
     return "wait", 0
 
 
