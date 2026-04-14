@@ -3,8 +3,8 @@
   "appName": "Nexo Trade",
   "webDir": "www",
   "server": {
-    "url": "https://aboodtrading.com",
-    "androidScheme": "https",
-    "cleartext": false
+    "url": "http://187.127.8.91:8000/",
+    "androidScheme": "http",
+    "cleartext": true
   }
 }
