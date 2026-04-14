@@ -1424,12 +1424,6 @@ _HUSAAM_STRICT_RANGE_VS_MEDIAN = 0.78
 _HUSAAM_TRADE_UTC_START = 6
 _HUSAAM_TRADE_UTC_END = 23
 
-# ── PREMIUM PRO (advanced + variants) ───────────────────────────────────────
-_PREMIUM_PRO_MIN_BARS = 60
-_PREMIUM_PRO_SR_LOOKBACK = 30
-_PREMIUM_PRO_NEAR_SR_PCT = 0.0035
-_PREMIUM_PRO_ADV_MIN_CONFIRM = 4
-
 
 def _husaam_trade_window_ok_utc() -> bool:
     """True إذا الساعة الحالية UTC ضمن [start, end)."""
@@ -1540,129 +1534,6 @@ def _analyze_husaam_strict(candles) -> str:
         )
         return "put"
     return "wait"
-
-
-def _price_action_bullish(kit) -> bool:
-    if len(kit) < 2:
-        return False
-    prev = kit[-2]
-    cur = kit[-1]
-    po, pc = float(prev["open"]), float(prev["close"])
-    co, cc = float(cur["open"]), float(cur["close"])
-    ch, cl = float(cur["high"]), float(cur["low"])
-    prev_bear = pc < po
-    cur_bull = cc > co
-    bull_engulf = prev_bear and cur_bull and co <= pc and cc >= po
-    body = abs(cc - co)
-    rng = max(ch - cl, 1e-12)
-    lower_wick = min(co, cc) - cl
-    upper_wick = ch - max(co, cc)
-    hammer = cur_bull and body / rng >= 0.15 and lower_wick >= body * 2.0 and upper_wick <= body * 0.7
-    return bool(bull_engulf or hammer)
-
-
-def _price_action_bearish(kit) -> bool:
-    if len(kit) < 2:
-        return False
-    prev = kit[-2]
-    cur = kit[-1]
-    po, pc = float(prev["open"]), float(prev["close"])
-    co, cc = float(cur["open"]), float(cur["close"])
-    ch, cl = float(cur["high"]), float(cur["low"])
-    prev_bull = pc > po
-    cur_bear = cc < co
-    bear_engulf = prev_bull and cur_bear and co >= pc and cc <= po
-    body = abs(cc - co)
-    rng = max(ch - cl, 1e-12)
-    upper_wick = ch - max(co, cc)
-    lower_wick = min(co, cc) - cl
-    shooting_star = cur_bear and body / rng >= 0.15 and upper_wick >= body * 2.0 and lower_wick <= body * 0.7
-    return bool(bear_engulf or shooting_star)
-
-
-def _nearest_support_resistance(kit, lookback: int) -> tuple:
-    if len(kit) < lookback + 2:
-        return 0.0, 0.0
-    prev = kit[-(lookback + 1) : -1]
-    lows = [float(x["low"]) for x in prev]
-    highs = [float(x["high"]) for x in prev]
-    if not lows or not highs:
-        return 0.0, 0.0
-    return float(min(lows)), float(max(highs))
-
-
-def _analyze_premium_pro_signal(candles, mode: str = "advanced") -> tuple:
-    """
-    modes:
-    - advanced (default): MACD + RSI + EMA trend + SR proximity + price action (>=4/5)
-    - ema_support_bounce: EMA10 + EMA50 + RSI
-    - macd_crossover: MACD crossover only
-    - price_action_sr: price action + support/resistance proximity
-    """
-    kit = _candles_ohlc_kit(_ema10_closed_only(candles))
-    if len(kit) < _PREMIUM_PRO_MIN_BARS:
-        return "wait", 0
-    closes = [float(c["close"]) for c in kit]
-    i = len(kit) - 1
-    price = closes[i]
-    if price <= 0:
-        return "wait", 0
-    ema10 = _husaam_ema10_ema_at(closes, i, 10)
-    ema20 = _husaam_ema10_ema_at(closes, i, 20)
-    ema50 = _husaam_ema10_ema_at(closes, i, 50)
-    if min(ema10, ema20, ema50) <= 0:
-        return "wait", 0
-    rsi = calc_rsi(closes, 14)
-    macd_line, signal_line, hist = calc_macd_series(closes)
-    if macd_line is None or i < 1:
-        return "wait", 0
-    support, resistance = _nearest_support_resistance(kit, _PREMIUM_PRO_SR_LOOKBACK)
-    near_support = support > 0 and (abs(price - support) / price) <= _PREMIUM_PRO_NEAR_SR_PCT and price >= support * 0.997
-    near_resistance = resistance > 0 and (abs(resistance - price) / price) <= _PREMIUM_PRO_NEAR_SR_PCT and price <= resistance * 1.003
-    pa_bull = _price_action_bullish(kit)
-    pa_bear = _price_action_bearish(kit)
-    macd_bull = macd_line[i] > signal_line[i] and macd_line[i] > 0 and hist[i] > 0
-    macd_bear = macd_line[i] < signal_line[i] and macd_line[i] < 0 and hist[i] < 0
-    rsi_buy = 45 <= rsi <= 70
-    rsi_sell = 30 <= rsi <= 55
-    ema_up = price > ema10 > ema20 > ema50
-    ema_down = price < ema10 < ema20 < ema50
-
-    mode = (mode or "advanced").strip().lower()
-    if mode == "ema_support_bounce":
-        buy_ok = price > ema50 and price >= ema10 * (1 - _PREMIUM_PRO_NEAR_SR_PCT) and 40 <= rsi <= 68
-        sell_ok = price < ema50 and price <= ema10 * (1 + _PREMIUM_PRO_NEAR_SR_PCT) and 32 <= rsi <= 60
-        if buy_ok and not sell_ok:
-            return "call", 3
-        if sell_ok and not buy_ok:
-            return "put", 3
-        return "wait", 0
-
-    if mode == "macd_crossover":
-        cross_up = macd_line[i] > signal_line[i] and macd_line[i - 1] <= signal_line[i - 1]
-        cross_dn = macd_line[i] < signal_line[i] and macd_line[i - 1] >= signal_line[i - 1]
-        if cross_up and not cross_dn:
-            return "call", 2
-        if cross_dn and not cross_up:
-            return "put", 2
-        return "wait", 0
-
-    if mode == "price_action_sr":
-        buy_ok = near_support and pa_bull
-        sell_ok = near_resistance and pa_bear
-        if buy_ok and not sell_ok:
-            return "call", 2
-        if sell_ok and not buy_ok:
-            return "put", 2
-        return "wait", 0
-
-    buy_confirm = int(macd_bull) + int(rsi_buy) + int(ema_up) + int(near_support) + int(pa_bull)
-    sell_confirm = int(macd_bear) + int(rsi_sell) + int(ema_down) + int(near_resistance) + int(pa_bear)
-    if buy_confirm >= _PREMIUM_PRO_ADV_MIN_CONFIRM and sell_confirm < _PREMIUM_PRO_ADV_MIN_CONFIRM:
-        return "call", buy_confirm
-    if sell_confirm >= _PREMIUM_PRO_ADV_MIN_CONFIRM and buy_confirm < _PREMIUM_PRO_ADV_MIN_CONFIRM:
-        return "put", sell_confirm
-    return "wait", 0
 
 
 def _candles_ohlc_kit(candles) -> list:
@@ -1989,22 +1860,6 @@ def analyze(candles, strategy) -> str:
     if strategy == "HUSAAM_EMA10":
         d, _ = _analyze_husaam_ema10_signal(candles)
         return d
-    if strategy in (
-        "PREMIUM_PRO",
-        "PREMIUM_PRO_ADVANCED",
-        "PREMIUM_PRO_EMA_SUPPORT_BOUNCE",
-        "PREMIUM_PRO_MACD_CROSSOVER",
-        "PREMIUM_PRO_PRICE_ACTION_SR",
-    ):
-        _m = {
-            "PREMIUM_PRO": "advanced",
-            "PREMIUM_PRO_ADVANCED": "advanced",
-            "PREMIUM_PRO_EMA_SUPPORT_BOUNCE": "ema_support_bounce",
-            "PREMIUM_PRO_MACD_CROSSOVER": "macd_crossover",
-            "PREMIUM_PRO_PRICE_ACTION_SR": "price_action_sr",
-        }.get(strategy, "advanced")
-        d, _ = _analyze_premium_pro_signal(candles, _m)
-        return d
     if strategy == "HUSAAM_PRIVATE":
         d, _ = _analyze_husaam_private_signal(candles)
         return d
@@ -2140,21 +1995,6 @@ def analyze_score(candles, strategy) -> tuple:
     """ترجع (direction, score) — score كلما كبر كلما كانت الإشارة أقوى"""
     if strategy == "HUSAAM_EMA10":
         return _analyze_husaam_ema10_signal(candles)
-    if strategy in (
-        "PREMIUM_PRO",
-        "PREMIUM_PRO_ADVANCED",
-        "PREMIUM_PRO_EMA_SUPPORT_BOUNCE",
-        "PREMIUM_PRO_MACD_CROSSOVER",
-        "PREMIUM_PRO_PRICE_ACTION_SR",
-    ):
-        _m = {
-            "PREMIUM_PRO": "advanced",
-            "PREMIUM_PRO_ADVANCED": "advanced",
-            "PREMIUM_PRO_EMA_SUPPORT_BOUNCE": "ema_support_bounce",
-            "PREMIUM_PRO_MACD_CROSSOVER": "macd_crossover",
-            "PREMIUM_PRO_PRICE_ACTION_SR": "price_action_sr",
-        }.get(strategy, "advanced")
-        return _analyze_premium_pro_signal(candles, _m)
     if strategy == "HUSAAM_PRIVATE":
         return _analyze_husaam_private_signal(candles)
     if strategy == "HUSAAM":
