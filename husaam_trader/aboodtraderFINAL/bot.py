@@ -1715,15 +1715,11 @@ def _analyze_husaam_ema10_signal(candles) -> tuple:
     ema_ent = _husaam_ema10_ema_at(closes, ent, p)
     if ema_sig <= 0 or ema_ent <= 0:
         return "wait", 0
-    general_trend = _husaam_ema10_general_trend(closes)
-
     close_tol = max(ema_sig * _HUSAAM_EMA10_CLOSE_TOL_PCT, 1e-12)
     touch_tol = max(ema_sig * _HUSAAM_EMA10_LOW_TOUCH_PCT, 1e-12)
     break_tol = max(ema_sig * (_HUSAAM_EMA10_BREAKDOWN_EXTRA_PCT + _HUSAAM_EMA10_CLOSE_TOL_PCT * 0.5), 1e-12)
 
     if call_pattern:
-        if general_trend != "up":
-            return "wait", 0
         # كسر واضح أسفل EMA على الشمعة الحمراء → رفض
         if cl_s < ema_sig - break_tol:
             return "wait", 0
@@ -1761,8 +1757,6 @@ def _analyze_husaam_ema10_signal(candles) -> tuple:
         )
         return "call", _HUSAAM_EMA10_SCORE
 
-    if general_trend != "down":
-        return "wait", 0
     # PUT: كسر واضح للأعلى على الشمعة الخضراء الإشارية → رفض (ليس رفضاً للصعود)
     if cl_s > ema_sig + break_tol:
         return "wait", 0
