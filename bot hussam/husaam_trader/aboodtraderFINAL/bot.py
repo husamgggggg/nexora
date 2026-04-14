@@ -1401,6 +1401,7 @@ _HUSAAM_EMA10_SCORE = 10
 _HUSAAM_EMA10_GENERAL_TREND_EMA = 34
 _HUSAAM_EMA10_GENERAL_TREND_LOOKBACK = 12
 _HUSAAM_EMA10_GENERAL_TREND_MIN_SLOPE_PCT = 0.00022
+_HUSAAM_EMA10_RETEST_CONFIRM_BODY_RATIO = 0.22
 # شارت Quotex دقيقة — الإشارة بعد إغلاق الشمعة على EMA وليس أثناء تكوّنها
 _HUSAAM_EMA10_CANDLE_SECS = 60
 # تخزين نتيجة get_candles ناجحة (ثوانٍ) — يقلل الضغط ويحافظ على مصدر واحد مع الشارت
@@ -1674,6 +1675,72 @@ def _husaam_ema10_general_trend(closes) -> str:
     return "side"
 
 
+def _husaam_ema10_retest_call(
+    kit, closes, sig: int, ent: int, ema_sig: float, ema_ent: float
+) -> bool:
+    """Retest صاعد: الشمعة الإشارية تعيد اختبار EMA وتغلق فوقه، ثم تأكيد خضراء قوية."""
+    h_s = float(kit[sig]["high"])
+    low_s = float(kit[sig]["low"])
+    cl_s = float(kit[sig]["close"])
+    o_e = float(kit[ent]["open"])
+    h_e = float(kit[ent]["high"])
+    low_e = float(kit[ent]["low"])
+    cl_e = float(kit[ent]["close"])
+    close_tol_sig = max(ema_sig * _HUSAAM_EMA10_CLOSE_TOL_PCT, 1e-12)
+    touch_tol_sig = max(ema_sig * _HUSAAM_EMA10_LOW_TOUCH_PCT, 1e-12)
+    close_tol_ent = max(ema_ent * _HUSAAM_EMA10_CLOSE_TOL_PCT, 1e-12)
+    touch_tol_ent = max(ema_ent * _HUSAAM_EMA10_LOW_TOUCH_PCT, 1e-12)
+    # شمعة Retest يجب أن تلمس EMA من الأعلى وتغلق فوقه
+    if low_s > ema_sig + touch_tol_sig:
+        return False
+    if cl_s < ema_sig - 0.35 * close_tol_sig:
+        return False
+    # شمعة التأكيد: خضراء واضحة وتكسر أعلى شمعة retest
+    if cl_e <= o_e:
+        return False
+    rng_e = max(h_e - low_e, 1e-12)
+    if (cl_e - o_e) / rng_e < _HUSAAM_EMA10_RETEST_CONFIRM_BODY_RATIO:
+        return False
+    if cl_e < h_s - 0.15 * close_tol_ent:
+        return False
+    if cl_e < ema_ent - 0.2 * touch_tol_ent:
+        return False
+    return True
+
+
+def _husaam_ema10_retest_put(
+    kit, closes, sig: int, ent: int, ema_sig: float, ema_ent: float
+) -> bool:
+    """Retest هابط: الشمعة الإشارية تعيد اختبار EMA وتغلق تحته، ثم تأكيد حمراء قوية."""
+    h_s = float(kit[sig]["high"])
+    low_s = float(kit[sig]["low"])
+    cl_s = float(kit[sig]["close"])
+    o_e = float(kit[ent]["open"])
+    h_e = float(kit[ent]["high"])
+    low_e = float(kit[ent]["low"])
+    cl_e = float(kit[ent]["close"])
+    close_tol_sig = max(ema_sig * _HUSAAM_EMA10_CLOSE_TOL_PCT, 1e-12)
+    touch_tol_sig = max(ema_sig * _HUSAAM_EMA10_LOW_TOUCH_PCT, 1e-12)
+    close_tol_ent = max(ema_ent * _HUSAAM_EMA10_CLOSE_TOL_PCT, 1e-12)
+    touch_tol_ent = max(ema_ent * _HUSAAM_EMA10_LOW_TOUCH_PCT, 1e-12)
+    # شمعة Retest يجب أن تلمس EMA من الأسفل وتغلق تحته
+    if h_s < ema_sig - touch_tol_sig:
+        return False
+    if cl_s > ema_sig + 0.35 * close_tol_sig:
+        return False
+    # شمعة التأكيد: حمراء واضحة وتكسر أدنى شمعة retest
+    if cl_e >= o_e:
+        return False
+    rng_e = max(h_e - low_e, 1e-12)
+    if (o_e - cl_e) / rng_e < _HUSAAM_EMA10_RETEST_CONFIRM_BODY_RATIO:
+        return False
+    if cl_e > low_s + 0.15 * close_tol_ent:
+        return False
+    if cl_e > ema_ent + 0.2 * touch_tol_ent:
+        return False
+    return True
+
+
 def _analyze_husaam_ema10_signal(candles) -> tuple:
     """
     CALL: ترند صاعد — حمراء إشارية على EMA ثم خضراء تأكيد (شموع مغلقة).
@@ -1708,8 +1775,6 @@ def _analyze_husaam_ema10_signal(candles) -> tuple:
 
     call_pattern = cl_s < o_s and cl_e > o_e
     put_pattern = cl_s > o_s and cl_e < o_e
-    if not call_pattern and not put_pattern:
-        return "wait", 0
 
     ema_sig = _husaam_ema10_ema_at(closes, sig, p)
     ema_ent = _husaam_ema10_ema_at(closes, ent, p)
@@ -1721,9 +1786,7 @@ def _analyze_husaam_ema10_signal(candles) -> tuple:
     touch_tol = max(ema_sig * _HUSAAM_EMA10_LOW_TOUCH_PCT, 1e-12)
     break_tol = max(ema_sig * (_HUSAAM_EMA10_BREAKDOWN_EXTRA_PCT + _HUSAAM_EMA10_CLOSE_TOL_PCT * 0.5), 1e-12)
 
-    if call_pattern:
-        if general_trend != "up":
-            return "wait", 0
+    if general_trend == "up" and call_pattern:
         # كسر واضح أسفل EMA على الشمعة الحمراء → رفض
         if cl_s < ema_sig - break_tol:
             return "wait", 0
@@ -1760,45 +1823,73 @@ def _analyze_husaam_ema10_signal(candles) -> tuple:
             ema_ent,
         )
         return "call", _HUSAAM_EMA10_SCORE
+    if general_trend == "up":
+        if _husaam_ema10_retest_call(kit, closes, sig, ent, ema_sig, ema_ent):
+            if _husaam_ema10_reject_flat_or_choppy(closes, p, ent):
+                return "wait", 0
+            log.debug(
+                "📌 NEXORA_EMA10 CALL retest@sig=%s confirm@ent=%s ema_sig=%.5f ema_ent=%.5f",
+                sig,
+                ent,
+                ema_sig,
+                ema_ent,
+            )
+            return "call", _HUSAAM_EMA10_SCORE
+        return "wait", 0
 
     if general_trend != "down":
         return "wait", 0
-    # PUT: كسر واضح للأعلى على الشمعة الخضراء الإشارية → رفض (ليس رفضاً للصعود)
-    if cl_s > ema_sig + break_tol:
-        return "wait", 0
-    if not _husaam_ema10_green_near_ema(cl_s, h_s, ema_sig, close_tol, touch_tol):
-        return "wait", 0
-    below = 0
-    for k in range(sig - _HUSAAM_EMA10_CONTEXT_BEFORE_SIGNAL, sig):
-        ema_k = _husaam_ema10_ema_at(closes, k, p)
-        if ema_k <= 0:
+
+    if put_pattern:
+        # PUT: كسر واضح للأعلى على الشمعة الخضراء الإشارية → رفض (ليس رفضاً للصعود)
+        if cl_s > ema_sig + break_tol:
             return "wait", 0
-        ct = max(ema_k * _HUSAAM_EMA10_CLOSE_TOL_PCT, 1e-12)
-        if closes[k] <= ema_k + 0.5 * ct:
-            below += 1
-    if below < _HUSAAM_EMA10_CONTEXT_BELOW_MIN:
-        return "wait", 0
-    rng_e = h_e - low_e
-    if rng_e <= 1e-12:
-        return "wait", 0
-    body_down = o_e - cl_e
-    if body_down / rng_e < _HUSAAM_EMA10_MIN_RED_BODY_RATIO:
-        return "wait", 0
-    touch_tol_ent = max(ema_ent * _HUSAAM_EMA10_LOW_TOUCH_PCT, 1e-12)
-    if cl_e > ema_ent + 0.35 * touch_tol_ent:
-        return "wait", 0
-    if o_e > ema_ent + 3.5 * touch_tol_ent:
-        return "wait", 0
-    if _husaam_ema10_reject_flat_or_choppy(closes, p, ent):
-        return "wait", 0
-    log.debug(
-        "📌 NEXORA_EMA10 PUT green@sig=%s red@ent=%s ema_sig=%.5f ema_ent=%.5f",
-        sig,
-        ent,
-        ema_sig,
-        ema_ent,
-    )
-    return "put", _HUSAAM_EMA10_SCORE
+        if not _husaam_ema10_green_near_ema(cl_s, h_s, ema_sig, close_tol, touch_tol):
+            return "wait", 0
+        below = 0
+        for k in range(sig - _HUSAAM_EMA10_CONTEXT_BEFORE_SIGNAL, sig):
+            ema_k = _husaam_ema10_ema_at(closes, k, p)
+            if ema_k <= 0:
+                return "wait", 0
+            ct = max(ema_k * _HUSAAM_EMA10_CLOSE_TOL_PCT, 1e-12)
+            if closes[k] <= ema_k + 0.5 * ct:
+                below += 1
+        if below < _HUSAAM_EMA10_CONTEXT_BELOW_MIN:
+            return "wait", 0
+        rng_e = h_e - low_e
+        if rng_e <= 1e-12:
+            return "wait", 0
+        body_down = o_e - cl_e
+        if body_down / rng_e < _HUSAAM_EMA10_MIN_RED_BODY_RATIO:
+            return "wait", 0
+        touch_tol_ent = max(ema_ent * _HUSAAM_EMA10_LOW_TOUCH_PCT, 1e-12)
+        if cl_e > ema_ent + 0.35 * touch_tol_ent:
+            return "wait", 0
+        if o_e > ema_ent + 3.5 * touch_tol_ent:
+            return "wait", 0
+        if _husaam_ema10_reject_flat_or_choppy(closes, p, ent):
+            return "wait", 0
+        log.debug(
+            "📌 NEXORA_EMA10 PUT green@sig=%s red@ent=%s ema_sig=%.5f ema_ent=%.5f",
+            sig,
+            ent,
+            ema_sig,
+            ema_ent,
+        )
+        return "put", _HUSAAM_EMA10_SCORE
+
+    if _husaam_ema10_retest_put(kit, closes, sig, ent, ema_sig, ema_ent):
+        if _husaam_ema10_reject_flat_or_choppy(closes, p, ent):
+            return "wait", 0
+        log.debug(
+            "📌 NEXORA_EMA10 PUT retest@sig=%s confirm@ent=%s ema_sig=%.5f ema_ent=%.5f",
+            sig,
+            ent,
+            ema_sig,
+            ema_ent,
+        )
+        return "put", _HUSAAM_EMA10_SCORE
+    return "wait", 0
 
 
 def _analyze_husaam_private_signal(candles) -> tuple:
