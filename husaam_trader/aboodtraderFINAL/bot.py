@@ -3215,6 +3215,9 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
         entry_window_min_sec, entry_window_max_sec = entry_window_max_sec, entry_window_min_sec
     # منع تكرار نفس الصفقة المتتالية بسرعة
     entry_cooldown_sec = max(30, trade_duration_sec)
+    # بعد تكرار WAIT عدة دورات، فعّل fallback أسرع (الافتراضي 6 ≈ قرابة دقيقة حسب زمن الدورة).
+    fallback_wait_streak = int(os.getenv("BOT_FALLBACK_WAIT_STREAK", "6") or 6)
+    fallback_wait_streak = max(2, min(fallback_wait_streak, 24))
 
     # يمنع بقاء worker قديم يعمل بعد Stop/Start جديد.
     def _should_stop() -> bool:
@@ -3433,7 +3436,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     continue
                 else:
                     S["_wait_streak"] = int(S.get("_wait_streak", 0)) + 1
-                    if S["_wait_streak"] >= 12:
+                    if S["_wait_streak"] >= fallback_wait_streak:
                         fb_best_score = 0
                         fb_best_dir = "wait"
                         fb_best_asset = None
