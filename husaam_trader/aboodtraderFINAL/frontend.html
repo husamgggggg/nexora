@@ -871,11 +871,46 @@ const ASSETS_REFRESH_INTERVAL_MS=10*60*1000;
 const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM_EMA10',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetsAwaitingQuotex:false,assetsQuotexSynced:false,assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0,demoLimit:0,demoUsed:0,realMinBal:50,limitsInt:null};
 const MAX_ASSETS=3;
 const FIAT_FLAG={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz',CHF:'ch',MXN:'mx',TRY:'tr',ZAR:'za',CNY:'cn',CNH:'cn',HKD:'hk',SGD:'sg',NOK:'no',SEK:'se',DKK:'dk',PLN:'pl',RUB:'ru',INR:'in',BRL:'br',KRW:'kr',THB:'th',IDR:'id',PHP:'ph',MYR:'my',HUF:'hu',CZK:'cz',ILS:'il',AED:'ae',SAR:'sa',USDT:'us',USDC:'us',BUSD:'us',TUSD:'us',DAI:'us'};
-const QUOTE_SUFFIXES=['USDT','USDC','BUSD','TUSD','DAI','EUR','GBP','USD','JPY','AUD','CAD','CHF','NZD','MXN','TRY','ZAR','SEK','NOK','DKK','PLN','CNY','CNH','HKD','SGD','INR','RUB','BRL','KRW','THB','IDR','PHP','MYR','HUF','CZK','ILS','AED','SAR'];
+const QUOTE_SUFFIXES=['USDT','USDC','BUSD','TUSD','DAI','EUR','GBP','USD','JPY','AUD','CAD','CHF','NZD','MXN','TRY','ZAR','SEK','NOK','DKK','PLN','CNY','CNH','HKD','SGD','INR','RUB','BRL','KRW','THB','IDR','PHP','MYR','HUF','CZK','ILS','AED','SAR','ARS','BDT','COP','DZD','EGP','NGN','PKR'];
 const CRYPTO_ICON_BASE='https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color';
 const CRYPTO_ICON_SLUG={BTC:'btc',ETH:'eth',BNB:'bnb',BCH:'bch',LTC:'ltc',XRP:'xrp',ADA:'ada',SOL:'sol',DOGE:'doge',TRX:'trx',DOT:'dot',LINK:'link',AVAX:'avax',AVA:'avax',ATOM:'atom',NEAR:'near',APT:'apt',ARB:'arb',OP:'op',XLM:'xlm',ETC:'etc',FIL:'fil',ICP:'icp',SHIB:'shib',UNI:'uni',AXS:'axs',MATIC:'matic',LRC:'lrc',APE:'ape',CRO:'cro',FTM:'ftm',ALGO:'algo',MANA:'mana',SAND:'sand',GRT:'grt',EOS:'eos',XTZ:'xtz',XMR:'xmr',ZEC:'zec',DASH:'dash',NEO:'neo',QTUM:'qtum',WAVES:'waves',THETA:'theta',VET:'vet',HBAR:'hbar',INJ:'inj',SUI:'sui',SEI:'sei',TIA:'tia',ORDI:'ordi',WIF:'wif',BONK:'bonk',PEPE:'pepe',FET:'fet',LUNA:'luna',RUNE:'rune',CRV:'crv',MKR:'mkr',SNX:'snx',COMP:'comp',YFI:'yfi',SUSHI:'sushi',AAVE:'aave',ENJ:'enj',CHZ:'chz',FLOW:'flow',GALA:'gala',IMX:'imx',STX:'stx',TWT:'twt',PAXG:'paxg','1INCH':'1inch'};
 const METAL_BADGE={XAU:'Au',XAG:'Ag',XPT:'Pt',XPD:'Pd'};
 const COMMODITY_BADGE={OIL:'Oil',WTI:'WTI',BRENT:'Br',NATGAS:'Ng',XBR:'Br',XTI:'WT',XNG:'Ng'};
+const COMMODITY_UI={
+  UKBRENT:{name:'UKBrent',icon:'🛢'},
+  BRENT:{name:'UKBrent',icon:'🛢'},
+  XBR:{name:'UKBrent',icon:'🛢'},
+  OIL:{name:'Oil',icon:'🛢'},
+  WTI:{name:'WTI',icon:'🛢'},
+  XTI:{name:'WTI',icon:'🛢'},
+  NATGAS:{name:'NatGas',icon:'⛽'},
+  XNG:{name:'NatGas',icon:'⛽'},
+  XAU:{name:'Gold',icon:'🥇'},
+  GOLD:{name:'Gold',icon:'🥇'},
+  XAG:{name:'Silver',icon:'🥈'},
+  SILVER:{name:'Silver',icon:'🥈'}
+};
+const STOCK_UI={
+  PFIZERINC:{name:'Pfizer Inc',logo:'https://logo.clearbit.com/pfizer.com'},
+  PFIZER:{name:'Pfizer Inc',logo:'https://logo.clearbit.com/pfizer.com'},
+  PFE:{name:'Pfizer Inc',logo:'https://logo.clearbit.com/pfizer.com'},
+  JOHNSONJOHNSON:{name:'Johnson & Johnson',logo:'https://logo.clearbit.com/jnj.com'},
+  JNJ:{name:'Johnson & Johnson',logo:'https://logo.clearbit.com/jnj.com'},
+  MICROSOFT:{name:'Microsoft',logo:'https://logo.clearbit.com/microsoft.com'},
+  MSFT:{name:'Microsoft',logo:'https://logo.clearbit.com/microsoft.com'},
+  BOEINGCOMPANY:{name:'Boeing Company',logo:'https://logo.clearbit.com/boeing.com'},
+  BOEING:{name:'Boeing Company',logo:'https://logo.clearbit.com/boeing.com'},
+  BA:{name:'Boeing Company',logo:'https://logo.clearbit.com/boeing.com'},
+  INTEL:{name:'Intel',logo:'https://logo.clearbit.com/intel.com'},
+  INTC:{name:'Intel',logo:'https://logo.clearbit.com/intel.com'},
+  MCDONALDS:{name:"McDonald's",logo:'https://logo.clearbit.com/mcdonalds.com'},
+  MCD:{name:"McDonald's",logo:'https://logo.clearbit.com/mcdonalds.com'},
+  FACEBOOKINC:{name:'Facebook Inc',logo:'https://logo.clearbit.com/meta.com'},
+  FACEBOOK:{name:'Facebook Inc',logo:'https://logo.clearbit.com/meta.com'},
+  META:{name:'Facebook Inc',logo:'https://logo.clearbit.com/meta.com'},
+  AMERICANEXPRESS:{name:'American Express',logo:'https://logo.clearbit.com/americanexpress.com'},
+  AXP:{name:'American Express',logo:'https://logo.clearbit.com/americanexpress.com'}
+};
 DEFAULT_ASSETS.forEach(a=>{
   const min=a.endsWith('_otc')?72:60;
   const max=a.endsWith('_otc')?92:86;
@@ -991,8 +1026,37 @@ function splitBaseQuote(asset){
   if(raw.length===6&&/^[A-Z]{6}$/.test(raw))return{base:raw.slice(0,3),quote:raw.slice(3),otc};
   return{base:raw,quote:'',otc};
 }
+function normalizeSymbolKey(v){
+  return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+}
+function commodityKeyFromAssetParts(base,quote){
+  const b=String(base||'').toUpperCase();
+  const q=String(quote||'').toUpperCase();
+  if(COMMODITY_UI[b])return b;
+  if(COMMODITY_UI[q])return q;
+  return null;
+}
+function stockKeyFromAssetParts(base,quote){
+  const b=normalizeSymbolKey(base);
+  const q=normalizeSymbolKey(quote);
+  if(STOCK_UI[b])return b;
+  if(STOCK_UI[q])return q;
+  return null;
+}
 function pairLabel(asset){
   const{base,quote,otc}=splitBaseQuote(asset);
+  const cKey=commodityKeyFromAssetParts(base,quote);
+  if(cKey){
+    let t=COMMODITY_UI[cKey].name;
+    if(otc)t+=' (OTC)';
+    return t;
+  }
+  const sKey=stockKeyFromAssetParts(base,quote);
+  if(sKey){
+    let t=STOCK_UI[sKey].name;
+    if(otc)t+=' (OTC)';
+    return t;
+  }
   let t=quote?`${base}/${quote}`:base;
   if(otc)t+=' (OTC)';
   return t;
@@ -1000,12 +1064,12 @@ function pairLabel(asset){
 const _ASSET_CRYPTO_CODES=new Set([
   ...Object.keys(CRYPTO_ICON_SLUG),
   'BTC','ETH','BNB','SOL','XRP','DOGE','TRX','ADA','DOT','LTC','BCH',
-  'USDT','USDC','BUSD','TUSD','DAI'
+  'USDT','USDC','BUSD','TUSD','DAI','TON','ATO'
 ]);
 const _ASSET_COMMODITY_CODES=new Set([
   ...Object.keys(METAL_BADGE),
   ...Object.keys(COMMODITY_BADGE),
-  'XAU','XAG','XPT','XPD','GOLD','SILVER','OIL','WTI','BRENT','NATGAS'
+  'XAU','XAG','XPT','XPD','GOLD','SILVER','OIL','WTI','BRENT','NATGAS','UKBRENT'
 ]);
 function classifyAssetKind(asset){
   const p=splitBaseQuote(asset);
@@ -1018,7 +1082,10 @@ function classifyAssetKind(asset){
 }
 function tokenIconHtml(tok,imgCls,genCls){
   const u=String(tok||'').toUpperCase();
+  const key=normalizeSymbolKey(u);
   if(!u)return `<span class="${genCls}" aria-hidden="true">·</span>`;
+  if(STOCK_UI[key]&&STOCK_UI[key].logo)return `<img class="${imgCls}" src="${STOCK_UI[key].logo}" alt="">`;
+  if(COMMODITY_UI[u])return `<span class="${genCls} oi-metal">${escHtml(COMMODITY_UI[u].icon)}</span>`;
   if(METAL_BADGE[u])return `<span class="${genCls} oi-metal">${escHtml(METAL_BADGE[u])}</span>`;
   if(COMMODITY_BADGE[u])return `<span class="${genCls} oi-metal">${escHtml(COMMODITY_BADGE[u])}</span>`;
   if(FIAT_FLAG[u])return `<img class="${imgCls}" src="https://flagcdn.com/w20/${FIAT_FLAG[u]}.png" alt="">`;
@@ -1028,6 +1095,10 @@ function tokenIconHtml(tok,imgCls,genCls){
 }
 function pairIconsHtml(asset,imgCls,genCls){
   const{base,quote}=splitBaseQuote(asset);
+  const cKey=commodityKeyFromAssetParts(base,quote);
+  if(cKey)return `<span class="oi-ic">${tokenIconHtml('USD',imgCls,genCls)}${tokenIconHtml(cKey,imgCls,genCls)}</span>`;
+  const sKey=stockKeyFromAssetParts(base,quote);
+  if(sKey)return `<span class="oi-ic">${tokenIconHtml('USD',imgCls,genCls)}${tokenIconHtml(sKey,imgCls,genCls)}</span>`;
   if(quote)return `<span class="oi-ic">${tokenIconHtml(base,imgCls,genCls)}${tokenIconHtml(quote,imgCls,genCls)}</span>`;
   return `<span class="oi-ic">${tokenIconHtml(base,imgCls,genCls)}${tokenIconHtml('USD',imgCls,genCls)}</span>`;
 }
