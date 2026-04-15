@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEXO TRADE | تحت الصيانة</title>
+<style>
+  :root{
+    --bg:#060d1a;
+    --card:#0d1b31;
+    --card2:#102340;
+    --line:rgba(129,171,255,.2);
+    --tx:#f2f6ff;
+    --tx2:#b7c7e6;
+    --accent:#4aa3ff;
+    --btn:#2f8cff;
+    --btn2:#1f6ed6;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    min-height:100vh;
+    font-family:"Segoe UI",Tahoma,Arial,sans-serif;
+    color:var(--tx);
+    background:
+      radial-gradient(circle at 20% 0%, rgba(74,163,255,.13), transparent 35%),
+      radial-gradient(circle at 100% 100%, rgba(74,163,255,.09), transparent 30%),
+      linear-gradient(180deg,#050b17 0%, var(--bg) 100%);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+  }
+  .card{
+    width:min(760px,100%);
+    border:1px solid var(--line);
+    border-radius:22px;
+    background:linear-gradient(180deg,var(--card2),var(--card));
+    box-shadow:0 25px 70px rgba(1,8,20,.55);
+    padding:34px 28px;
+    text-align:center;
+  }
+  .gear{
+    width:56px;height:56px;margin:0 auto 14px;
+    border-radius:16px;
+    display:grid;place-items:center;
+    background:rgba(74,163,255,.12);
+    color:var(--accent);
+    font-size:30px;
+  }
+  h1{
+    margin:0 0 10px;
+    font-size:48px;
+    line-height:1.2;
+    font-weight:800;
+    letter-spacing:-0.3px;
+  }
+  p{
+    margin:0 auto;
+    max-width:620px;
+    color:var(--tx2);
+    font-size:24px;
+    line-height:1.8;
+  }
+  .status{
+    margin:26px auto 20px;
+    max-width:620px;
+    text-align:right;
+    border:1px solid rgba(129,171,255,.16);
+    border-radius:14px;
+    background:rgba(8,17,31,.5);
+    padding:14px 16px;
+    color:var(--tx2);
+    font-size:18px;
+    line-height:1.8;
+  }
+  .status b{color:var(--tx);font-size:20px}
+  .actions{
+    display:flex;
+    gap:10px;
+    justify-content:center;
+    margin-top:8px;
+    flex-wrap:wrap;
+  }
+  .btn{
+    appearance:none;
+    border:1px solid rgba(129,171,255,.3);
+    background:rgba(14,27,49,.65);
+    color:var(--tx);
+    padding:11px 16px;
+    border-radius:11px;
+    font-size:17px;
+    text-decoration:none;
+  }
+  .btn.primary{
+    background:linear-gradient(135deg,var(--btn),var(--btn2));
+    border-color:rgba(74,163,255,.55);
+  }
+  .foot{margin-top:22px;color:#8ca3cc;font-size:15px}
+  @media (max-width:640px){
+    h1{font-size:34px}
+    p{font-size:19px}
+    .status{font-size:16px}
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="gear">⚙</div>
+    <h1>النظام تحت الصيانة</h1>
+    <p>نقوم حاليًا بتحديث النظام وتحسين الأداء. نعود إليكم قريبًا.</p>
+    <div class="status">
+      <b>تحديث الحالة</b><br>
+      من المتوقع أن تستغرق أعمال الصيانة وقتًا قصيرًا.
+    </div>
+    <div class="actions">
+      <a class="btn primary" href="https://t.me/" target="_blank" rel="noopener">تواصل مع فريق الدعم</a>
+      <a class="btn" href="/">تحديث الصفحة</a>
+    </div>
+    <div class="foot">© 2026 NEXO TRADE</div>
+  </main>
+</body>
+</html>

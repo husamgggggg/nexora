@@ -382,6 +382,17 @@ tbody tr:last-child td{border-bottom:none;}
       </div>
       <p class="modal-sub" style="margin:14px 0 18px;">الحد الأدنى لتشغيل البوت على الحساب الحقيقي: <strong id="setRealMinRo">50</strong> USD (ثابت في الخادم).</p>
       <button type="button" class="btn btn-primary" style="width:auto;min-width:160px;padding:0 22px;" onclick="saveAdminSettings()">حفظ</button>
+      <div style="margin-top:22px;padding-top:18px;border-top:1px solid var(--border);">
+        <h3 style="font-size:.98rem;font-weight:800;margin:0 0 10px;">وضع الصيانة</h3>
+        <p class="modal-sub" style="margin:0 0 14px;">عند التفعيل، يتم حجب جميع المستخدمين عن الواجهة وواجهات API العامة حتى يتم إيقاف الصيانة من هنا.</p>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+          <div>
+            <div id="maintState" class="pill p-rejected">معطّل</div>
+            <div id="maintUpdated" class="cell-date" style="margin-top:8px;">آخر تحديث: —</div>
+          </div>
+          <button type="button" class="btn btn-warn" id="maintBtn" style="min-height:44px;padding:0 18px;" onclick="toggleMaintenanceMode()">تفعيل الصيانة</button>
+        </div>
+      </div>
     </div>
   </section>
 </div>
@@ -409,6 +420,7 @@ let AT = '';
 let pendingAction = null;
 let _adminPollId = null;
 let admTab = 'users';
+let maintenanceMode = false;
 
 function escHtml(s){
   return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -544,6 +556,58 @@ async function loadAdminSettings(){
   }
   const ro = document.getElementById('setRealMinRo');
   if(ro && d.real_min_balance_usd != null) ro.textContent = String(Number(d.real_min_balance_usd).toFixed(0));
+  maintenanceMode = !!(d && d.maintenance_mode);
+  renderMaintenanceUi(maintenanceMode, d && d.maintenance_updated_at);
+}
+
+function formatMaintenanceTs(iso){
+  if(!iso) return '—';
+  try{
+    const dt = new Date(iso);
+    if(Number.isNaN(dt.getTime())) return '—';
+    return dt.toLocaleString('ar',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  }catch(_){ return '—'; }
+}
+
+function renderMaintenanceUi(on, updatedAt){
+  const state = document.getElementById('maintState');
+  const btn = document.getElementById('maintBtn');
+  const upd = document.getElementById('maintUpdated');
+  if(!state || !btn || !upd) return;
+  if(on){
+    state.className = 'pill p-pending';
+    state.textContent = 'مفعّل الآن';
+    btn.className = 'btn btn-danger';
+    btn.textContent = 'إيقاف الصيانة';
+  }else{
+    state.className = 'pill p-approved';
+    state.textContent = 'معطّل';
+    btn.className = 'btn btn-warn';
+    btn.textContent = 'تفعيل الصيانة';
+  }
+  upd.textContent = 'آخر تحديث: ' + formatMaintenanceTs(updatedAt);
+}
+
+async function toggleMaintenanceMode(){
+  if(!AT) return;
+  const wantEnable = !maintenanceMode;
+  let activationPassword = '';
+  if(wantEnable){
+    activationPassword = prompt('أدخل كلمة مرور تفعيل الصيانة') || '';
+    if(!activationPassword) return;
+  }
+  const d = await api('/admin/maintenance','POST',{
+    admin_token: AT,
+    enabled: wantEnable,
+    activation_password: activationPassword
+  });
+  if(d && d.success){
+    maintenanceMode = !!d.maintenance_mode;
+    renderMaintenanceUi(maintenanceMode, d.maintenance_updated_at);
+    toast(maintenanceMode ? 'تم تفعيل وضع الصيانة' : 'تم إيقاف وضع الصيانة','ok');
+    return;
+  }
+  toast((d && d.detail) ? String(d.detail) : 'تعذّر تغيير وضع الصيانة','er');
 }
 
 async function saveAdminSettings(){

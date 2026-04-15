@@ -29,7 +29,7 @@ except Exception:  # pragma: no cover
 import pydantic, uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 
@@ -818,11 +818,12 @@ DEMO_DAILY_TRADES_F = "data/demo_daily_trades.json"
 REAL_MIN_BALANCE_USD = 50.0
 # تسجيل خروج تلقائي إذا مرّ هذا الوقت والمستخدم لم يشغّل البوت
 try:
-    NO_BOT_AUTO_LOGOUT_SEC = int(os.getenv("NO_BOT_AUTO_LOGOUT_SEC", "3600") or 3600)
+    NO_BOT_AUTO_LOGOUT_SEC = int(os.getenv("NO_BOT_AUTO_LOGOUT_SEC", "900") or 900)
 except (TypeError, ValueError):
-    NO_BOT_AUTO_LOGOUT_SEC = 3600
+    NO_BOT_AUTO_LOGOUT_SEC = 900
 NO_BOT_AUTO_LOGOUT_SEC = max(300, min(NO_BOT_AUTO_LOGOUT_SEC, 7 * 24 * 3600))
 ADMIN_PW = os.getenv("ADMIN_PW", "Admin@2024")
+MAINTENANCE_ACTIVATION_PW = os.getenv("MAINTENANCE_ACTIVATION_PW", "62336557")
 _ALLOWED_ORIGINS_RAW = os.getenv(
     "ALLOWED_ORIGINS",
     "http://localhost:8000,http://127.0.0.1:8000",
@@ -903,7 +904,35 @@ def _admin_settings_dict() -> dict:
         lim = 5
     if lim < 0:
         lim = 0
-    return {"demo_max_trades_per_day": lim}
+    maintenance_mode = bool(raw.get("maintenance_mode", False))
+    maintenance_updated_at = str(raw.get("maintenance_updated_at", "") or "")
+    return {
+        "demo_max_trades_per_day": lim,
+        "maintenance_mode": maintenance_mode,
+        "maintenance_updated_at": maintenance_updated_at,
+    }
+
+
+def _save_admin_settings_dict(st: dict) -> None:
+    cur = _admin_settings_dict()
+    if not isinstance(st, dict):
+        st = {}
+    try:
+        lim = int(st.get("demo_max_trades_per_day", cur.get("demo_max_trades_per_day", 5)))
+    except (TypeError, ValueError):
+        lim = int(cur.get("demo_max_trades_per_day", 5) or 5)
+    if lim < 0:
+        lim = 0
+    mm = bool(st.get("maintenance_mode", cur.get("maintenance_mode", False)))
+    mu = str(st.get("maintenance_updated_at", cur.get("maintenance_updated_at", "")) or "")
+    save(
+        ADMIN_SETTINGS_F,
+        {
+            "demo_max_trades_per_day": lim,
+            "maintenance_mode": mm,
+            "maintenance_updated_at": mu,
+        },
+    )
 
 
 def _demo_trades_daily_limit() -> int:
@@ -1304,6 +1333,12 @@ class ApproveReq(BaseModel):
 class AdminSettingsReq(BaseModel):
     admin_token: str
     demo_max_trades_per_day: int
+
+
+class AdminMaintenanceReq(BaseModel):
+    admin_token: str
+    enabled: bool
+    activation_password: str = ""
 
 # ── Async Loop ────────────────────────────────────────────────────────────────
 _loop = asyncio.new_event_loop()
@@ -3439,6 +3474,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 _need_len = _min_bars
                 _max_len = 0
                 ema_src_label = ""
+                ema_src_label_ok = ""
                 _scan_rows = []  # (asset, dir, score) لبصمة دورة كاملة — يمنع تكرار 🔍 كل ثانية
                 for a in all_assets:
                     if req.strategy == "HUSAAM_PRIVATE":
@@ -3473,6 +3509,8 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     candles_by_asset[a] = candles
                     if len(candles) >= _need_len:
                         any_candles = True
+                        if _csrc not in ("quotex_insufficient",):
+                            ema_src_label_ok = ema_src_label
                         d, score = analyze_score(candles, req.strategy)
                         _scan_rows.append((a, d, score))
                         if d != "wait" and score > best_score:
@@ -3494,7 +3532,10 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                         S["_last_scan_fp_ts"] = _tn
 
                 S["candles_ok"] = any_candles
-                S["candle_source"] = ema_src_label
+                S["candle_source"] = ema_src_label_ok or ema_src_label
+                # إذا عاد التحليل يملك شموعًا كافية، امسح رسالة "نقص الشموع" القديمة
+                if any_candles and str(S.get("status_msg", "")).startswith("⏳ شموع دقيقة:"):
+                    S["status_msg"] = ""
 
                 if best_asset and best_dir != "wait":
                     direction    = best_dir
@@ -3851,11 +3892,33 @@ if os.getenv("DEBUG_API_LOG", "").strip().lower() in ("1", "true", "yes"):
             log.info("➡️ API %s %s", request.method, request.url.path)
         return await call_next(request)
 
+
+@app.middleware("http")
+async def _maintenance_mode_guard(request, call_next):
+    path = request.url.path or "/"
+    if path.startswith("/admin") or path.startswith("/api/admin"):
+        return await call_next(request)
+    st = _admin_settings_dict()
+    if not bool(st.get("maintenance_mode", False)):
+        return await call_next(request)
+    if path.startswith("/api"):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "maintenance": True,
+                "detail": "النظام تحت الصيانة حالياً. الرجاء المحاولة لاحقاً.",
+            },
+        )
+    return HTMLResponse(MAINTENANCE_HTML, status_code=503)
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 _fe = os.path.join(APP_DIR, "frontend.html")
 _ad = os.path.join(APP_DIR, "admin.html")
+_mh = os.path.join(APP_DIR, "maintenance.html")
 HTML  = open(_fe,encoding="utf-8").read() if os.path.exists(_fe) else "<h1>frontend.html مفقود</h1>"
 ADMIN = open(_ad,encoding="utf-8").read() if os.path.exists(_ad) else "<h1>admin.html مفقود</h1>"
+MAINTENANCE_HTML = open(_mh, encoding="utf-8").read() if os.path.exists(_mh) else "<h1>النظام تحت الصيانة</h1>"
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -3956,6 +4019,8 @@ async def admin_get_settings(admin_token: str):
     return {
         "demo_max_trades_per_day": st.get("demo_max_trades_per_day", 5),
         "real_min_balance_usd": REAL_MIN_BALANCE_USD,
+        "maintenance_mode": bool(st.get("maintenance_mode", False)),
+        "maintenance_updated_at": st.get("maintenance_updated_at", ""),
     }
 
 @app.post("/api/admin/settings")
@@ -3965,9 +4030,30 @@ async def admin_post_settings(req: AdminSettingsReq):
     lim = int(req.demo_max_trades_per_day)
     if lim < 0:
         lim = 0
-    save(ADMIN_SETTINGS_F, {"demo_max_trades_per_day": lim})
+    st = _admin_settings_dict()
+    st["demo_max_trades_per_day"] = lim
+    _save_admin_settings_dict(st)
     log.info("⚙️ إعدادات المسؤول: demo_max_trades_per_day=%s", lim)
     return {"success": True, "demo_max_trades_per_day": lim}
+
+
+@app.post("/api/admin/maintenance")
+async def admin_set_maintenance(req: AdminMaintenanceReq):
+    if req.admin_token not in ADMIN_TOKENS:
+        raise HTTPException(403, "غير مصرح")
+    want_enable = bool(req.enabled)
+    if want_enable and str(req.activation_password or "") != MAINTENANCE_ACTIVATION_PW:
+        raise HTTPException(403, "كلمة مرور تفعيل الصيانة غير صحيحة")
+    st = _admin_settings_dict()
+    st["maintenance_mode"] = want_enable
+    st["maintenance_updated_at"] = datetime.now(timezone.utc).isoformat()
+    _save_admin_settings_dict(st)
+    log.warning("🛠️ Maintenance mode changed: %s", "ON" if want_enable else "OFF")
+    return {
+        "success": True,
+        "maintenance_mode": want_enable,
+        "maintenance_updated_at": st["maintenance_updated_at"],
+    }
 
 @app.get("/api/admin/users")
 async def admin_users(admin_token: str):
