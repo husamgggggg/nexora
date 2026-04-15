@@ -754,10 +754,6 @@ h1{font-size:18px;}
 <!-- ══ STATS ══ -->
 <div id="sSt" class="scr">
   <div class="hdr"><div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main" id="stTitle">الإحصائيات</div></div></div>
-  <div class="langRow">
-    <button class="langBtn" data-lang="ar" type="button" onclick="setLang('ar')">العربية</button>
-    <button class="langBtn" data-lang="en" type="button" onclick="setLang('en')">English</button>
-  </div>
   <div class="sgrd">
     <div class="stc">
       <div class="stl">
@@ -1539,49 +1535,99 @@ function stepVal(inputId,delta){
 }
 const HELP={
   start:{
-    title:'كيف أبدأ التداول؟',
-    body:`
-      <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
-        1) اختر حسابك (Real أو Demo).
-        <br>2) فعّل البوت من تبويب الروبوت.
-        <br>3) حدّد استراتيجية مناسبة واختَر أزواجاً كافية.
-        <br>4) راقب الإحصائيات وتأكد من تشغيل هدف الربح/حد الخسارة إذا رغبت.
-      </div>
-    `
+    ar:{
+      title:'كيف أبدأ التداول؟',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          1) اختر حسابك (Real أو Demo).
+          <br>2) فعّل البوت من تبويب الروبوت.
+          <br>3) حدّد استراتيجية مناسبة واختَر أزواجاً كافية.
+          <br>4) راقب الإحصائيات وتأكد من تشغيل هدف الربح/حد الخسارة إذا رغبت.
+        </div>
+      `
+    },
+    en:{
+      title:'How do I start trading?',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          1) Choose your account type (Real or Demo).
+          <br>2) Activate the bot from the Bot tab.
+          <br>3) Select a suitable strategy and enough trading pairs.
+          <br>4) Monitor statistics and enable take-profit/stop-loss if needed.
+        </div>
+      `
+    }
   },
   real_demo:{
-    title:'الحقيقي والتجريبي',
-    body:`
-      <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
-        - Demo: تداول بمحاكاة لتجربة الإعدادات دون مخاطرة.
-        <br>- Real: تداول بأموال حقيقية.
-        <br><br>نصيحة: ابدأ بـ Demo ثم انتقل إلى Real بعد التأكد من ثبات الأداء.
-      </div>
-    `
+    ar:{
+      title:'الحقيقي والتجريبي',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          - Demo: تداول بمحاكاة لتجربة الإعدادات دون مخاطرة.
+          <br>- Real: تداول بأموال حقيقية.
+          <br><br>نصيحة: ابدأ بـ Demo ثم انتقل إلى Real بعد التأكد من ثبات الأداء.
+        </div>
+      `
+    },
+    en:{
+      title:'Real vs Demo',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          - Demo: simulated trading to test settings without risk.
+          <br>- Real: trading with real funds.
+          <br><br>Tip: start with Demo, then move to Real after stable performance.
+        </div>
+      `
+    }
   },
   profit_loss:{
-    title:'ضبط هدف الربح وحد الخسارة',
-    body:`
-      <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
-        - فعّل زر هدف الربح وحدّد القيمة (بالـ USD).
-        <br>- فعّل زر حد الخسارة وحدّد القيمة (بالـ USD).
-        <br>- عند الوصول للهدف أو حد الخسارة يتوقف البوت تلقائياً.
-      </div>
-    `
+    ar:{
+      title:'ضبط هدف الربح وحد الخسارة',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          - فعّل زر هدف الربح وحدّد القيمة (بالـ USD).
+          <br>- فعّل زر حد الخسارة وحدّد القيمة (بالـ USD).
+          <br>- عند الوصول للهدف أو حد الخسارة يتوقف البوت تلقائياً.
+        </div>
+      `
+    },
+    en:{
+      title:'Take Profit / Stop Loss',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          - Enable Take Profit and set its value (USD).
+          <br>- Enable Stop Loss and set its value (USD).
+          <br>- Bot stops automatically when either limit is reached.
+        </div>
+      `
+    }
   },
   multi_assets:{
-    title:'كيف أختار أكثر من زوج؟',
-    body:`
-      <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
-        اختر عدة أزواج لزيادة فرص ظهور الإشارة بشكل متكرر.
-        <br>لكن لا تكثر كثيراً حتى تظل الإحصائيات مفهومة.
-        <br><br>قاعدة عملية: ابدأ بـ 2–5 أزواج ثم وسّع تدريجياً.
-      </div>
-    `
+    ar:{
+      title:'كيف أختار أكثر من زوج؟',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          اختر عدة أزواج لزيادة فرص ظهور الإشارة بشكل متكرر.
+          <br>لكن لا تكثر كثيراً حتى تظل الإحصائيات مفهومة.
+          <br><br>قاعدة عملية: ابدأ بـ 2–5 أزواج ثم وسّع تدريجياً.
+        </div>
+      `
+    },
+    en:{
+      title:'How to choose multiple pairs?',
+      body:`
+        <div style="padding:8px 2px 2px;color:var(--tx);font-size:14px;font-weight:800;line-height:1.8;">
+          Choose multiple pairs to increase signal opportunities.
+          <br>But avoid selecting too many so stats remain clear.
+          <br><br>Practical rule: start with 2-5 pairs, then scale gradually.
+        </div>
+      `
+    }
   }
 };
 function openHelp(key){
-  const d=HELP[key]||HELP.start;
+  const pack=(HELP[key]||HELP.start);
+  const d=pack[uiLang]||pack.ar;
   const mt=document.getElementById('mTit');if(mt)mt.textContent=d.title;
   const ml=document.getElementById('mList');if(ml)ml.innerHTML=d.body;
   document.getElementById('mbg').classList.add('on');
