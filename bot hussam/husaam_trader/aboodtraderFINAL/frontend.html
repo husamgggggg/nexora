@@ -679,6 +679,10 @@ h1{font-size:18px;}
     <div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main">NEXO <span>TRADE</span></div></div>
     <div class="hdr-r"><div class="hdr-id" id="hId">#00000000</div><div class="hdr-em" id="hEm">email</div></div>
   </div>
+  <div class="langRow">
+    <button class="langBtn" data-lang="ar" type="button" onclick="setLang('ar')">العربية</button>
+    <button class="langBtn" data-lang="en" type="button" onclick="setLang('en')">English</button>
+  </div>
   <div id="simA"></div>
   <div class="acc-hero">
     <div class="acc-badge">نيكسو تريد</div>
@@ -751,8 +755,8 @@ h1{font-size:18px;}
 <div id="sSt" class="scr">
   <div class="hdr"><div class="logo-wrap"><div class="logo-top">نيكسو تريد</div><div class="logo-main" id="stTitle">الإحصائيات</div></div></div>
   <div class="langRow">
-    <button class="langBtn sel" id="langAr" type="button" onclick="setLang('ar')">العربية</button>
-    <button class="langBtn" id="langEn" type="button" onclick="setLang('en')">English</button>
+    <button class="langBtn" data-lang="ar" type="button" onclick="setLang('ar')">العربية</button>
+    <button class="langBtn" data-lang="en" type="button" onclick="setLang('en')">English</button>
   </div>
   <div class="sgrd">
     <div class="stc">
@@ -1300,7 +1304,7 @@ function startPoll(){
         toast(sm,sm.includes('🎯')?'ok':'er');
         let banner=document.getElementById('statusBanner');
         if(!banner){banner=document.createElement('div');banner.id='statusBanner';banner.style.cssText='position:fixed;top:65px;left:50%;transform:translateX(-50%);z-index:500;background:var(--card2);border:2px solid;border-radius:16px;padding:14px 20px;font-size:14px;font-weight:700;text-align:center;max-width:90%;backdrop-filter:blur(12px);box-shadow:0 8px 30px rgba(0,0,0,.5);';document.body.appendChild(banner);}
-        banner.textContent=sm;banner.style.borderColor=sm.includes('🎯')?'var(--g)':'var(--r)';banner.style.color=sm.includes('🎯')?'var(--g)':'var(--r)';banner.style.display='block';
+        banner.textContent=_translateRuntime(sm);banner.style.borderColor=sm.includes('🎯')?'var(--g)':'var(--r)';banner.style.color=sm.includes('🎯')?'var(--g)':'var(--r)';banner.style.display='block';
       }else{const banner=document.getElementById('statusBanner');if(banner)banner.style.display='none';}
     }else{const banner=document.getElementById('statusBanner');if(banner)banner.style.display='none';}
     if(!d.running&&s.running){s.running=false;document.getElementById('stBtn').textContent='ابدأ التداول';document.getElementById('stBtn').classList.remove('stop');}
@@ -1447,7 +1451,6 @@ const _AR_TO_EN_RAW={
 const _AR_TO_EN=Object.entries(_AR_TO_EN_RAW).sort((a,b)=>b[0].length-a[0].length);
 const _TXT_ORIG=new WeakMap();
 const _ATTR_ORIG=new WeakMap();
-let _i18nObserver=null;
 function _isArabicText(v){return /[\u0600-\u06FF]/.test(String(v||''));}
 function _toEn(v){
   let t=String(v||'');
@@ -1496,22 +1499,7 @@ function _applyI18n(root){
   root.querySelectorAll&&root.querySelectorAll('*').forEach(_applyElementAttrs);
   document.title=_translateRuntime('NEXO TRADE | منصة التداول');
 }
-function _ensureI18nObserver(){
-  if(_i18nObserver)return;
-  _i18nObserver=new MutationObserver(muts=>{
-    muts.forEach(m=>{
-      if(m.type==='characterData'&&m.target)_applyTextNode(m.target);
-      if(m.type==='attributes'&&m.target&&m.target.nodeType===1)_applyElementAttrs(m.target);
-      if(m.type==='childList'){
-        m.addedNodes.forEach(n=>{
-          if(n.nodeType===3)_applyTextNode(n);
-          else if(n.nodeType===1)_applyI18n(n);
-        });
-      }
-    });
-  });
-  _i18nObserver.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['placeholder','title','aria-label']});
-}
+function _ensureI18nObserver(){}
 function _locale(){return uiLang==='en'?'en-US':'ar';}
 function updStatsLabels(){
   const d=LANG[uiLang]||LANG.ar;
@@ -1527,9 +1515,9 @@ function setLang(l){
   try{localStorage.setItem('nexora_ui_lang',uiLang);}catch(_){}
   document.documentElement.lang=uiLang;
   document.documentElement.dir=(uiLang==='en')?'ltr':'rtl';
-  const bAr=document.getElementById('langAr'),bEn=document.getElementById('langEn');
-  if(bAr)bAr.classList.toggle('sel',uiLang==='ar');
-  if(bEn)bEn.classList.toggle('sel',uiLang==='en');
+  document.querySelectorAll('.langBtn[data-lang]').forEach(btn=>{
+    btn.classList.toggle('sel',btn.dataset.lang===uiLang);
+  });
   _applyI18n(document.body);
   updStatsLabels();
   updStats();
