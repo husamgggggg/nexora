@@ -2547,6 +2547,8 @@ def _build_candles(email: str, asset, candle_secs=5) -> list:
 _husaam_api_candle_cache: dict = {}  # (email, asset) -> {t, candles, source: "quotex"}
 _husaam_ema10_analysis_log_ts: dict = {}  # (email, asset) -> وقت آخر log تفصيلي (تخفيف تكرار الكاش)
 _husaam_ema10_pipeline_log_ts: dict = {}  # (asset,current_asset) -> آخر وقت log pipeline
+_husaam_micro_candle_cache: dict = {}  # (email, asset, period) -> {t, candles}
+_husaam_last_fetch_ts: dict = {}  # (email, asset) -> آخر وقت محاولة fetch من Quotex
 
 
 def _normalize_quotex_candle_row(c):
@@ -2875,7 +2877,14 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
         return _build_candles(email, asset, candle_secs=_HUSAAM_EMA10_CANDLE_SECS), "sim_tick_1m"
     now = time.time()
     _ck = _session_ema_cache_key(email, asset)
+    _mck = (_ck[0], _ck[1], _HUSAAM_EMA10_CANDLE_SECS)
     ce = _husaam_api_candle_cache.get(_ck)
+    mc = _husaam_micro_candle_cache.get(_mck)
+
+    _short_cache_sec = float(os.getenv("BOT_CANDLE_SHORT_CACHE_SEC", "1.5") or 1.5)
+    _short_cache_sec = max(0.5, min(_short_cache_sec, 2.5))
+    _fetch_min_iv = float(os.getenv("BOT_CANDLE_FETCH_MIN_INTERVAL_SEC", "8") or 8)
+    _fetch_min_iv = max(6.0, min(_fetch_min_iv, 10.0))
 
     def _finalize(raw: list, label: str) -> tuple:
         prep = _prepare_husaam_ema10_candles_for_analysis(raw, max_bars=tgt)
@@ -2903,6 +2912,11 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
             _husaam_ema10_analysis_log_ts[_ck] = _tl
         return out, label
 
+    if mc and (now - float(mc.get("t", 0.0) or 0.0)) < _short_cache_sec:
+        got, lab = _finalize(mc.get("candles") or [], "quotex_1m_micro_cache")
+        if got:
+            return got, lab
+
     if _central_market_enabled() and QX and client:
         snap = _central_get_candle_snapshot(asset)
         if snap and snap.get("candles"):
@@ -2925,6 +2939,14 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
         if len(prep0) >= tgt:
             return _finalize(ce["candles"], "quotex_1m_cache")
 
+    _last_fetch = float(_husaam_last_fetch_ts.get(_ck, 0.0) or 0.0)
+    _since_last = now - _last_fetch
+    if _last_fetch > 0.0 and _since_last < _fetch_min_iv:
+        if ce and ce.get("candles"):
+            got, lab = _finalize(ce["candles"], "quotex_1m_throttle_cache")
+            if got:
+                return got, lab
+
     try:
         _fto = float(
             os.getenv(
@@ -2935,6 +2957,7 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
         )
         _fto = max(30.0, min(_fto, 180.0))
         _ser = os.getenv("NEXORA_SERIALIZE_QUOTEX_CANDLE_FETCH", "per_client").strip().lower()
+        _husaam_last_fetch_ts[_ck] = time.time()
         if _ser in ("0", "false", "no", "off"):
             lst = run_async_for(
                 email,
@@ -2964,7 +2987,9 @@ def _get_husaam_ema10_candles(client, email: str, asset: str, need_len: int, ana
         lst = []
 
     if lst:
-        _husaam_api_candle_cache[_ck] = {"t": now, "candles": lst, "source": "quotex"}
+        _tn = time.time()
+        _husaam_api_candle_cache[_ck] = {"t": _tn, "candles": lst, "source": "quotex"}
+        _husaam_micro_candle_cache[_mck] = {"t": _tn, "candles": lst}
         got, lab = _finalize(lst, "quotex_1m")
         if got:
             return got, lab
@@ -3230,6 +3255,15 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     if req.asset and req.asset not in all_assets:
         all_assets.insert(0, req.asset)
     all_assets = list(dict.fromkeys(all_assets))  # إزالة المكررات
+    _max_assets = int(os.getenv("BOT_MAX_ASSETS_PER_SESSION", "2") or 2)
+    _max_assets = max(1, min(_max_assets, 8))
+    if len(all_assets) > _max_assets:
+        log.info(
+            "⚖️ تقليل الأزواج المتزامنة للجلسة: %s -> %s (BOT_MAX_ASSETS_PER_SESSION)",
+            len(all_assets),
+            _max_assets,
+        )
+        all_assets = all_assets[:_max_assets]
     log.info(f"🤖 {S['email']} | {all_assets} | {req.amount} | {req.strategy} | {req.account_type}")
     # مدة الصفقة: افتراضياً 60 ثانية. بعض حسابات Quotex ترفض 90s وتسبب timeout.
     trade_duration_sec = int(os.getenv("TRADE_DURATION_SEC", "60") or 60)
