@@ -106,6 +106,7 @@ def _install_pyquotex_ws_candle_asset_fix():
     if getattr(WebsocketClient.on_message, "_husaam_ws_patch", False):
         return
     _orig = WebsocketClient.on_message
+    _hist_log_ts = {}
 
     def _on_message(self, wss, msg):
         _orig(self, wss, msg)
@@ -158,13 +159,19 @@ def _install_pyquotex_ws_candle_asset_fix():
                 d = getattr(api, "_nexora_ws_last", None)
                 if isinstance(d, dict):
                     d["patched_fill"] = True
-            log.info(
-                "🔧 WS: عُدّل تخزين شموع history (msg_asset=%s current=%s hist_len=%s v2=%s)",
-                ma,
-                ca,
-                hl,
-                bool(message.get("candles")),
-            )
+            _k = str(ma or ca or "unknown")
+            _iv = float(os.getenv("WS_HISTORY_PATCH_LOG_INTERVAL_SEC", "15") or 15)
+            _iv = max(3.0, min(_iv, 300.0))
+            _tn = time.time()
+            if _tn - float(_hist_log_ts.get(_k, 0.0) or 0.0) >= _iv:
+                log.info(
+                    "🔧 WS: عُدّل تخزين شموع history (msg_asset=%s current=%s hist_len=%s v2=%s)",
+                    ma,
+                    ca,
+                    hl,
+                    bool(message.get("candles")),
+                )
+                _hist_log_ts[_k] = _tn
         else:
             if api is not None:
                 d = getattr(api, "_nexora_ws_last", None)
@@ -189,6 +196,23 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger("NexoraTrade")
+_LOG_THROTTLE_TS: dict = {}
+
+
+def _log_every(key: str, interval_sec: float) -> bool:
+    """يرجع True إذا مرّ زمن كافٍ لتسجيل الرسالة، لتخفيف ضجيج اللوج."""
+    try:
+        iv = float(interval_sec)
+    except Exception:
+        iv = 0.0
+    if iv <= 0:
+        return True
+    now = time.time()
+    last = float(_LOG_THROTTLE_TS.get(key, 0.0) or 0.0)
+    if now - last < iv:
+        return False
+    _LOG_THROTTLE_TS[key] = now
+    return True
 
 if _QX_IMPORT_ERR is not None:
     log.warning("pyquotex غير محمّل — وضع محاكاة. السبب: %s", _QX_IMPORT_ERR)
@@ -741,12 +765,15 @@ def _install_pyquotex_ws_proxy_patch(proxies):
 
     _start_websocket_with_proxy._nexora_ws_proxy_patch = True
     QuotexAPI.start_websocket = _start_websocket_with_proxy
-    log.info(
-        "تم تفعيل WS proxy patch لـ pyquotex: %s:%s (%s)",
-        ws_proxy.get("http_proxy_host"),
-        ws_proxy.get("http_proxy_port"),
-        ws_proxy.get("proxy_type"),
-    )
+    _iv = float(os.getenv("WS_PROXY_PATCH_LOG_INTERVAL_SEC", "300") or 300)
+    _iv = max(30.0, min(_iv, 3600.0))
+    if _log_every("ws_proxy_patch_info", _iv):
+        log.info(
+            "تم تفعيل WS proxy patch لـ pyquotex: %s:%s (%s)",
+            ws_proxy.get("http_proxy_host"),
+            ws_proxy.get("http_proxy_port"),
+            ws_proxy.get("proxy_type"),
+        )
 
 
 QX_HTTP_PROXIES = _init_zenrows_for_pyquotex()
@@ -2519,6 +2546,7 @@ def _build_candles(email: str, asset, candle_secs=5) -> list:
 
 _husaam_api_candle_cache: dict = {}  # (email, asset) -> {t, candles, source: "quotex"}
 _husaam_ema10_analysis_log_ts: dict = {}  # (email, asset) -> وقت آخر log تفصيلي (تخفيف تكرار الكاش)
+_husaam_ema10_pipeline_log_ts: dict = {}  # (asset,current_asset) -> آخر وقت log pipeline
 
 
 def _normalize_quotex_candle_row(c):
@@ -2775,6 +2803,13 @@ def _log_husaam_fetch_diag(
     after_get_candles: bool,
     client=None,
 ) -> None:
+    _iv = float(os.getenv("BOT_EMA10_PIPELINE_LOG_INTERVAL_SEC", "20") or 20)
+    _iv = max(5.0, min(_iv, 300.0))
+    _key = f"{asset}|{current_asset}|{period}|{int(bool(after_get_candles))}"
+    _tn = time.time()
+    if _tn - float(_husaam_ema10_pipeline_log_ts.get(_key, 0.0) or 0.0) < _iv:
+        return
+    _husaam_ema10_pipeline_log_ts[_key] = _tn
     n = len(best)
     first_ts = last_ts = None
     if best:

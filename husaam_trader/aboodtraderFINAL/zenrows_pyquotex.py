@@ -39,11 +39,28 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from typing import Any
 
 log = logging.getLogger("NexoraTrade.zenrows")
 
 _BROWSER_PATCHED = False
+_LOG_TS: dict[str, float] = {}
+
+
+def _log_every(key: str, interval_sec: float) -> bool:
+    try:
+        iv = float(interval_sec)
+    except Exception:
+        iv = 0.0
+    if iv <= 0:
+        return True
+    now = time.time()
+    last = float(_LOG_TS.get(key, 0.0) or 0.0)
+    if now - last < iv:
+        return False
+    _LOG_TS[key] = now
+    return True
 
 
 def pyquotex_proxies_from_env() -> dict[str, str] | None:
@@ -172,7 +189,10 @@ def configure_zenrows_from_environment() -> dict[str, str] | None:
 
     proxies = pyquotex_proxies_from_env()
     if proxies:
-        log.info("تم تفعيل بروكسي pyquotex (HTTP/S) — راجع ZENROWS_* أو QUOTEX_* أو HTTPS_PROXY")
+        _iv = float(os.getenv("ZENROWS_PROXY_INFO_LOG_INTERVAL_SEC", "300") or 300)
+        _iv = max(30.0, min(_iv, 3600.0))
+        if _log_every("proxy_enabled_info", _iv):
+            log.info("تم تفعيل بروكسي pyquotex (HTTP/S) — راجع ZENROWS_* أو QUOTEX_* أو HTTPS_PROXY")
     elif not key:
         log.warning(
             "بروكسي pyquotex غير مفعّل: عيّن ZENROWS_API_KEY (Universal) أو ZENROWS_PROXY_URL أو HTTPS_PROXY"
