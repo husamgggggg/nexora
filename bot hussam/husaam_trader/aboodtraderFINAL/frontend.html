@@ -229,6 +229,14 @@ body{font-family:'Roboto',sans-serif;font-size:16px;font-weight:700;background:v
   box-shadow:0 10px 25px rgba(41,121,255,.22);
 }
 .langBtn:active{transform:scale(.98);}
+html[dir="ltr"] .hdr-r{text-align:left;}
+html[dir="ltr"] .fg input[type=text]{direction:ltr;text-align:left;}
+html[dir="ltr"] .oi,
+html[dir="ltr"] .sup-item,
+html[dir="ltr"] .mtt,
+html[dir="ltr"] .lml,
+html[dir="ltr"] .lsub{text-align:left;}
+html[dir="ltr"] .lvc-close{left:auto;right:10px;}
 .stc{background:var(--card);border:1px solid var(--br);border-radius:15px;padding:15px;position:relative;overflow:hidden;}
 .stc::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}
 .stc:nth-child(1)::before{background:linear-gradient(90deg,var(--purple),var(--bl));}
@@ -1321,6 +1329,190 @@ const LANG={
     tTradesLblPl:'trades'
   }
 };
+const _AR_TO_EN_RAW={
+  'NEXO TRADE | منصة التداول':'NEXO TRADE | Trading Platform',
+  'منصة تداول احترافية':'Professional Trading Platform',
+  'نيكسو تريد':'Nexo Trade',
+  'بوت التداول الآلي الذكي على منصة Quotex':'Smart automated trading bot on Quotex',
+  'طلب الانضمام':'Join Request',
+  'سجّل بياناتك — سيراجع المسؤول طلبك ويفعّل حسابك':'Enter your details - Admin reviews and activates your account',
+  'معرّف الحساب (ID)':'Account ID',
+  'أدخل الأيدي (أرقام فقط)':'Enter ID (numbers only)',
+  'البريد الإلكتروني':'Email',
+  'إرسال الطلب':'Send Request',
+  'لديّ حساب مفعّل ← تحقق من الحالة':'I have an active account - Check status',
+  'التحقق من حالة الطلب':'Request Status Check',
+  'أدخل بريدك لمعرفة حالة الطلب':'Enter your email to check request status',
+  'تحقق الآن':'Check Now',
+  '← إرسال طلب جديد':'<- Send New Request',
+  'NEXO TRADE — بوت التداول الذكي':'NEXO TRADE - Smart Trading Bot',
+  'تسجيل الدخول بحساب Quotex':'Login with Quotex Account',
+  'أدخل بيانات حساب Quotex الخاص بك':'Enter your Quotex account credentials',
+  'كلمة المرور':'Password',
+  'دخول وتشغيل البوت':'Login & Run Bot',
+  '← تسجيل خروج / تغيير الحساب':'<- Logout / Switch account',
+  'رمز التحقق':'Verification Code',
+  'أرسل Quotex رمزاً إلى':'Quotex sent a code to',
+  'رمز PIN':'PIN Code',
+  'تأكيد الرمز':'Confirm PIN',
+  '← العودة':'<- Back',
+  'مرحباً':'Welcome',
+  'متصل بـ Quotex':'Connected to Quotex',
+  'إيداع':'Deposit',
+  'سحب':'Withdraw',
+  'تسجيل خروج':'Logout',
+  'الحساب':'Account',
+  'الدعم':'Support',
+  'روبوت':'Bot',
+  'إحصائيات':'Statistics',
+  'اختيار الحساب':'Account Selection',
+  'الإعدادات':'Settings',
+  'الأزواج المختارة':'Selected Pairs',
+  'الاستراتيجية':'Strategy',
+  'المبلغ والحدود':'Amount and Limits',
+  'حجم الصفقة':'Trade Amount',
+  'هدف الربح':'Take Profit',
+  'حد الخسارة':'Stop Loss',
+  'زيادة':'Increase',
+  'نقصان':'Decrease',
+  'يوقف عند +':'Stops at +',
+  'يوقف عند -':'Stops at -',
+  'معطّل':'Disabled',
+  'مدة الصفقة:':'Trade duration:',
+  'الدخول يتم عند اكتمال الإشارة فقط':'Entry only when signal is complete',
+  'لا دخول عشوائي':'No random entries',
+  'يتم اختيار أفضل زوج تلقائياً':'Best pair auto-selected',
+  'ابدأ التداول':'Start Trading',
+  'العربية':'Arabic',
+  'مركز المساعدة':'Help Center',
+  'الأسئلة الشائعة وإرشادات الاستخدام':'FAQ and usage guidance',
+  'كيف أبدأ التداول؟':'How do I start trading?',
+  'ما الفرق بين الحساب الحقيقي والتجريبي؟':'What is the difference between real and demo?',
+  'كيف أضبط هدف الربح وحد الخسارة؟':'How to set take profit and stop loss?',
+  'كيف أختار أكثر من زوج؟':'How do I choose multiple pairs?',
+  'إغلاق':'Close',
+  'شراء':'Buy',
+  'بيع':'Sell',
+  'المبلغ':'Amount',
+  'الوقت':'Time',
+  'إيقاف البوت':'Stop Bot',
+  'اختر':'Select',
+  'إلغاء':'Cancel',
+  'وضع محاكاة':'Simulation Mode',
+  'متصل — Quotex جاهز':'Connected - Quotex Ready',
+  '⚠️ وضع المحاكاة — pyquotex غير متصلة':'Simulation mode - pyquotex is disconnected',
+  'جارٍ الإرسال...':'Sending...',
+  'جارٍ التحقق...':'Verifying...',
+  'جارٍ الاتصال...':'Connecting...',
+  'الأيدي يجب أن يكون أرقام فقط':'ID must contain numbers only',
+  'أدخل بريد صحيح':'Enter a valid email',
+  'خطأ في الاتصال':'Connection error',
+  'تم':'Done',
+  'خطأ':'Error',
+  'بريد غير صحيح':'Invalid email',
+  'كلمة مرور قصيرة':'Password too short',
+  'تعذر الاتصال بالخادم — المتصفح لم يصل إلى /api (تحقق من العنوان: localhost هنا = جهازك وليس السيرفر)':'Cannot reach server - browser did not reach /api (localhost here means your device, not server)',
+  'أدخل رمز PIN من البريد أو تطبيق Quotex':'Enter PIN from email or Quotex app',
+  'فشل':'Failed',
+  'أدخل PIN كامل':'Enter full PIN',
+  'تعذر الاتصال بالخادم':'Cannot connect to server',
+  'انتهت مهلة التحقق — جرّب رمزاً جديداً من البريد أو أعد تسجيل الدخول':'Verification timeout - try a new code or log in again',
+  '✅ مرحباً بك في نيكسو تريد':'Welcome to Nexo Trade',
+  'تم تسجيل الخروج':'Logged out',
+  'أدخل مبلغ صحيح':'Enter a valid amount',
+  'وصلت الحد اليومي لصفقات التجريبي (':'You reached daily demo trades limit (',
+  '). يُتاح المزيد غداً أو استخدم الحساب الحقيقي.':'). More available tomorrow or use real account.',
+  'رصيد الحساب الحقيقي أقل من الحد الأدنى المطلوب لتشغيل البوت (':'Real balance is below minimum required to run bot (',
+  ' USD).':' USD).',
+  'لا يوجد أزواج متاحة للتداول الآن':'No trading pairs available now',
+  'تم تشغيل البوت بنجاح':'Bot started successfully',
+  'وصلت الحد اليومي لصفقات التجريبي (':'Reached daily demo trades limit (',
+  ').':').',
+  '🎯 وصلت لهدف الربح +':'Take profit reached +',
+  '🛑 وصلت لحد الخسارة -':'Stop loss reached -',
+  'جارية...':'Running...',
+  '… جاري جلب الأزواج من المنصة':'Loading pairs from platform...',
+  'لا يوجد زوج متاح':'No pair available',
+  'اختر الأزواج':'Choose Pairs',
+  'جاري جلب الأزواج المفتوحة من Quotex…\nأعد فتح القائمة بعد قليل إن استمرت فارغة.':'Loading open pairs from Quotex...\nReopen the list shortly if still empty.',
+  'لا يوجد أزواج مفتوحة حالياً. جرّب بعد قليل.':'No open pairs currently. Try again shortly.',
+  '── OTC ──':'-- OTC --',
+  '── البورصة ──':'-- Exchange --',
+  'الحد الأقصى 3 أزواج':'Maximum is 3 pairs',
+  'اختر زوج واحد على الأقل':'Choose at least one pair',
+  '✅ تأكيد (':'Confirm (',
+  'اختر الاستراتيجية':'Choose Strategy',
+  '✅ تم استعادة جلستك':'Session restored'
+};
+const _AR_TO_EN=Object.entries(_AR_TO_EN_RAW).sort((a,b)=>b[0].length-a[0].length);
+const _TXT_ORIG=new WeakMap();
+const _ATTR_ORIG=new WeakMap();
+let _i18nObserver=null;
+function _isArabicText(v){return /[\u0600-\u06FF]/.test(String(v||''));}
+function _toEn(v){
+  let t=String(v||'');
+  _AR_TO_EN.forEach(([ar,en])=>{t=t.split(ar).join(en);});
+  return t;
+}
+function _translateRuntime(v){return uiLang==='en' ? _toEn(v) : String(v||'');}
+function _applyTextNode(node){
+  const raw=String(node.nodeValue||'');
+  if(!raw.trim())return;
+  if(uiLang==='en'){
+    if(_isArabicText(raw))_TXT_ORIG.set(node,raw);
+    const base=_TXT_ORIG.get(node)||raw;
+    node.nodeValue=_toEn(base);
+  }else{
+    const base=_TXT_ORIG.get(node);
+    if(base!=null)node.nodeValue=base;
+  }
+}
+function _applyElementAttrs(el){
+  ['placeholder','title','aria-label'].forEach(attr=>{
+    if(!el.hasAttribute(attr))return;
+    let m=_ATTR_ORIG.get(el);
+    if(!m){m={};_ATTR_ORIG.set(el,m);}
+    const cur=el.getAttribute(attr)||'';
+    if(uiLang==='en'){
+      if(_isArabicText(cur))m[attr]=cur;
+      const base=m[attr]||cur;
+      el.setAttribute(attr,_toEn(base));
+    }else if(m[attr]!=null){
+      el.setAttribute(attr,m[attr]);
+    }
+  });
+}
+function _applyI18n(root){
+  const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{
+    acceptNode(node){
+      if(!node||!node.parentElement)return NodeFilter.FILTER_REJECT;
+      const p=node.parentElement.tagName;
+      if(p==='SCRIPT'||p==='STYLE')return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  while(w.nextNode())_applyTextNode(w.currentNode);
+  if(root.nodeType===1)_applyElementAttrs(root);
+  root.querySelectorAll&&root.querySelectorAll('*').forEach(_applyElementAttrs);
+  document.title=_translateRuntime('NEXO TRADE | منصة التداول');
+}
+function _ensureI18nObserver(){
+  if(_i18nObserver)return;
+  _i18nObserver=new MutationObserver(muts=>{
+    muts.forEach(m=>{
+      if(m.type==='characterData'&&m.target)_applyTextNode(m.target);
+      if(m.type==='attributes'&&m.target&&m.target.nodeType===1)_applyElementAttrs(m.target);
+      if(m.type==='childList'){
+        m.addedNodes.forEach(n=>{
+          if(n.nodeType===3)_applyTextNode(n);
+          else if(n.nodeType===1)_applyI18n(n);
+        });
+      }
+    });
+  });
+  _i18nObserver.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['placeholder','title','aria-label']});
+}
+function _locale(){return uiLang==='en'?'en-US':'ar';}
 function updStatsLabels(){
   const d=LANG[uiLang]||LANG.ar;
   const elTitle=document.getElementById('stTitle');if(elTitle)elTitle.textContent=d.stTitle;
@@ -1332,11 +1524,17 @@ function updStatsLabels(){
 }
 function setLang(l){
   uiLang=(l==='en')?'en':'ar';
+  try{localStorage.setItem('nexora_ui_lang',uiLang);}catch(_){}
+  document.documentElement.lang=uiLang;
+  document.documentElement.dir=(uiLang==='en')?'ltr':'rtl';
   const bAr=document.getElementById('langAr'),bEn=document.getElementById('langEn');
   if(bAr)bAr.classList.toggle('sel',uiLang==='ar');
   if(bEn)bEn.classList.toggle('sel',uiLang==='en');
+  _applyI18n(document.body);
   updStatsLabels();
   updStats();
+  updAssetLabel();
+  renderBadge();
 }
 function stepVal(inputId,delta){
   const el=document.getElementById(inputId);if(!el)return;
@@ -1430,13 +1628,13 @@ function addLog(tr){
   if(!list)return;
   const nt=list.querySelector('.nt');if(nt)nt.remove();
   const win=tr.status==='win';const el=document.createElement('div');el.className='tli';
-    el.innerHTML=`<div class="tlr ${win?'w':tr.status==='loss'?'l':''}">${tr.status==='pending'?'جارية...':(win?'+':'')+tr.profit+' '+s.currency}</div><div class="tld ${tr.direction==='call'?'up':'dn'}">${tr.direction==='call'?'▲ شراء':'▼ بيع'}</div><div><div class="tlp">${escHtml(pairLabel(tr.asset||''))}</div><div class="tlt">${new Date(tr.started_at).toLocaleTimeString('ar')}</div></div>`;
+    el.innerHTML=`<div class="tlr ${win?'w':tr.status==='loss'?'l':''}">${tr.status==='pending'?_translateRuntime('جارية...'):(win?'+':'')+tr.profit+' '+s.currency}</div><div class="tld ${tr.direction==='call'?'up':'dn'}">${tr.direction==='call'?'▲ '+_translateRuntime('شراء'):'▼ '+_translateRuntime('بيع')}</div><div><div class="tlp">${escHtml(pairLabel(tr.asset||''))}</div><div class="tlt">${new Date(tr.started_at).toLocaleTimeString(_locale())}</div></div>`;
   list.insertBefore(el,list.firstChild);while(list.children.length>50)list.removeChild(list.lastChild);
 }
 function renderLogs(trades){
   const list=document.getElementById('logL');if(!list)return;list.innerHTML='';
   trades.forEach(t=>{const win=t.status==='win';const el=document.createElement('div');el.className='tli';
-    el.innerHTML=`<div class="tlr ${win?'w':'l'}">${win?'+':''}${t.profit||0} ${s.currency}</div><div class="tld ${t.direction==='call'?'up':'dn'}">${t.direction==='call'?'▲ شراء':'▼ بيع'}</div><div><div class="tlp">${escHtml(pairLabel(t.asset||''))}</div><div class="tlt">${new Date(t.started_at).toLocaleTimeString('ar')}</div></div>`;
+    el.innerHTML=`<div class="tlr ${win?'w':'l'}">${win?'+':''}${t.profit||0} ${s.currency}</div><div class="tld ${t.direction==='call'?'up':'dn'}">${t.direction==='call'?'▲ '+_translateRuntime('شراء'):'▼ '+_translateRuntime('بيع')}</div><div><div class="tlp">${escHtml(pairLabel(t.asset||''))}</div><div class="tlt">${new Date(t.started_at).toLocaleTimeString(_locale())}</div></div>`;
     list.appendChild(el);});
 }
 function selAcc(t){s.acc=t;document.getElementById('bReal').classList.toggle('sel',t==='real');document.getElementById('bDemo').classList.toggle('sel',t==='demo');}
@@ -1535,7 +1733,7 @@ function go(id,idx){
     next.style.transition='';
   },270);
 }
-let tT;function toast(msg,type){const el=document.getElementById('toastEl');el.textContent=msg;el.className='toast on '+(type||'');clearTimeout(tT);tT=setTimeout(()=>el.classList.remove('on'),10000);}
+let tT;function toast(msg,type){const el=document.getElementById('toastEl');el.textContent=_translateRuntime(msg);el.className='toast on '+(type||'');clearTimeout(tT);tT=setTimeout(()=>el.classList.remove('on'),10000);}
 
 // ── استعادة الجلسة تلقائياً ─────────────────────────────────
 const _em=localStorage.getItem('at_email');
@@ -1570,7 +1768,9 @@ if(_em){
     })();
   }
 }
-setLang('ar');
+_ensureI18nObserver();
+const _savedLang=(function(){try{return localStorage.getItem('nexora_ui_lang')||'ar';}catch(_){return 'ar';}})();
+setLang(_savedLang);
 checkConn();
 updAssetLabel();
 </script>

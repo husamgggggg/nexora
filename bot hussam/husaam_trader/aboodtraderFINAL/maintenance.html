@@ -107,17 +107,51 @@
 <body>
   <main class="card">
     <div class="gear">⚙</div>
-    <h1>النظام تحت الصيانة</h1>
-    <p>نقوم حاليًا بتحديث النظام وتحسين الأداء. نعود إليكم قريبًا.</p>
+    <h1 id="mTitle">النظام تحت الصيانة</h1>
+    <p id="mDesc">نقوم حاليًا بتحديث النظام وتحسين الأداء. نعود إليكم قريبًا.</p>
     <div class="status">
-      <b>تحديث الحالة</b><br>
-      من المتوقع أن تستغرق أعمال الصيانة وقتًا قصيرًا.
+      <b id="mStatusHead">تحديث الحالة</b><br>
+      <span id="mStatusText">من المتوقع أن تستغرق أعمال الصيانة وقتًا قصيرًا.</span>
     </div>
     <div class="actions">
-      <a class="btn primary" href="https://t.me/" target="_blank" rel="noopener">تواصل مع فريق الدعم</a>
-      <a class="btn" href="/">تحديث الصفحة</a>
+      <a class="btn primary" id="mSupport" href="https://t.me/" target="_blank" rel="noopener">تواصل مع فريق الدعم</a>
+      <a class="btn" id="mRefresh" href="/">تحديث الصفحة</a>
     </div>
     <div class="foot">© 2026 NEXO TRADE</div>
   </main>
+  <script>
+    (function(){
+      const TXT = {
+        ar: {
+          title: "NEXO TRADE | تحت الصيانة",
+          mTitle: "النظام تحت الصيانة",
+          mDesc: "نقوم حاليًا بتحديث النظام وتحسين الأداء. نعود إليكم قريبًا.",
+          mStatusHead: "تحديث الحالة",
+          mStatusText: "من المتوقع أن تستغرق أعمال الصيانة وقتًا قصيرًا.",
+          mSupport: "تواصل مع فريق الدعم",
+          mRefresh: "تحديث الصفحة"
+        },
+        en: {
+          title: "NEXO TRADE | Maintenance",
+          mTitle: "System Under Maintenance",
+          mDesc: "We are currently updating the system and improving performance. We will be back shortly.",
+          mStatusHead: "Status Update",
+          mStatusText: "Maintenance is expected to take a short time.",
+          mSupport: "Contact Support Team",
+          mRefresh: "Refresh Page"
+        }
+      };
+      let lang = "ar";
+      try{ lang = (localStorage.getItem("nexora_ui_lang") === "en") ? "en" : "ar"; }catch(_){}
+      const t = TXT[lang] || TXT.ar;
+      document.documentElement.lang = lang;
+      document.documentElement.dir = (lang === "en") ? "ltr" : "rtl";
+      document.title = t.title;
+      ["mTitle","mDesc","mStatusHead","mStatusText","mSupport","mRefresh"].forEach(id=>{
+        const el = document.getElementById(id);
+        if(el) el.textContent = t[id];
+      });
+    })();
+  </script>
 </body>
 </html>
