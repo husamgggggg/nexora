@@ -509,6 +509,7 @@ def _stop_playwright_bridge_for_api(api) -> None:
     try:
         api._nexora_pw_bridge_proc = None
         api._nexora_pw_bridge_port = None
+        api._nexora_pw_bridge_target_ws_url = ""
     except Exception:
         pass
     if proc is None:
@@ -527,6 +528,25 @@ def _stop_playwright_bridge_for_api(api) -> None:
             proc.kill()
         except Exception:
             pass
+
+
+def _playwright_bridge_alive_for_api(api) -> bool:
+    if api is None:
+        return False
+    proc = getattr(api, "_nexora_pw_bridge_proc", None)
+    port = getattr(api, "_nexora_pw_bridge_port", None)
+    if proc is None or port is None:
+        return False
+    try:
+        if proc.poll() is not None:
+            return False
+    except Exception:
+        return False
+    try:
+        p = int(port)
+    except Exception:
+        return False
+    return _local_tcp_port_listening(p) or _wait_port_open("127.0.0.1", p, 0.8)
 
 
 def _pick_free_port() -> int:
@@ -591,7 +611,15 @@ def _ensure_playwright_bridge(target_ws_url: str, api_owner):
     if not os.path.isfile(bridge_file):
         log.warning("Playwright bridge file غير موجود: %s", bridge_file)
         return None
-    # إيقاف جسر *هذه* الجلسة فقط قبل منفذ جديد (إعادة اتصال WS لنفس الحساب)
+    # إعادة استخدام نفس الجسر للحساب إن كان حيّاً وبنفس target.
+    existing_target = str(getattr(api_owner, "_nexora_pw_bridge_target_ws_url", "") or "")
+    if _playwright_bridge_alive_for_api(api_owner) and existing_target == str(target_ws_url):
+        port = getattr(api_owner, "_nexora_pw_bridge_port", None)
+        if port:
+            log.info("♻️ Playwright WS bridge reused: ws://127.0.0.1:%s", port)
+            return f"ws://127.0.0.1:{int(port)}"
+
+    # إن كان هناك جسر قديم (ميت/هدف مختلف) نعيد إنشاؤه.
     _stop_playwright_bridge_for_api(api_owner)
 
     port = _pick_free_port()
@@ -630,11 +658,13 @@ def _ensure_playwright_bridge(target_ws_url: str, api_owner):
         )
         api_owner._nexora_pw_bridge_proc = proc
         api_owner._nexora_pw_bridge_port = port
+        api_owner._nexora_pw_bridge_target_ws_url = str(target_ws_url)
     except Exception as e:
         log.warning("تعذر تشغيل Playwright bridge: %s", e)
         try:
             api_owner._nexora_pw_bridge_proc = None
             api_owner._nexora_pw_bridge_port = None
+            api_owner._nexora_pw_bridge_target_ws_url = ""
         except Exception:
             pass
         return None
@@ -653,6 +683,7 @@ def _ensure_playwright_bridge(target_ws_url: str, api_owner):
         try:
             api_owner._nexora_pw_bridge_proc = None
             api_owner._nexora_pw_bridge_port = None
+            api_owner._nexora_pw_bridge_target_ws_url = ""
         except Exception:
             pass
         return None
