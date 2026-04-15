@@ -997,6 +997,25 @@ function pairLabel(asset){
   if(otc)t+=' (OTC)';
   return t;
 }
+const _ASSET_CRYPTO_CODES=new Set([
+  ...Object.keys(CRYPTO_ICON_SLUG),
+  'BTC','ETH','BNB','SOL','XRP','DOGE','TRX','ADA','DOT','LTC','BCH',
+  'USDT','USDC','BUSD','TUSD','DAI'
+]);
+const _ASSET_COMMODITY_CODES=new Set([
+  ...Object.keys(METAL_BADGE),
+  ...Object.keys(COMMODITY_BADGE),
+  'XAU','XAG','XPT','XPD','GOLD','SILVER','OIL','WTI','BRENT','NATGAS'
+]);
+function classifyAssetKind(asset){
+  const p=splitBaseQuote(asset);
+  const base=String(p.base||'').toUpperCase();
+  const quote=String(p.quote||'').toUpperCase();
+  if(_ASSET_COMMODITY_CODES.has(base)||_ASSET_COMMODITY_CODES.has(quote))return 'commodities';
+  if(_ASSET_CRYPTO_CODES.has(base)||_ASSET_CRYPTO_CODES.has(quote))return 'crypto';
+  if(base&&quote&&QUOTE_SUFFIXES.includes(base)&&QUOTE_SUFFIXES.includes(quote))return 'forex';
+  return 'stocks';
+}
 function tokenIconHtml(tok,imgCls,genCls){
   const u=String(tok||'').toUpperCase();
   if(!u)return `<span class="${genCls}" aria-hidden="true">·</span>`;
@@ -1705,10 +1724,60 @@ function om(key){
       document.getElementById('mbg').classList.add('on');
       return;
     }
-    const h1=document.createElement('div');h1.style.cssText='font-size:10px;color:var(--gold);font-weight:700;padding:4px 2px 8px;letter-spacing:1px;';h1.textContent='── OTC ──';list.appendChild(h1);
-    otcAssets.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
-    const h2=document.createElement('div');h2.style.cssText='font-size:10px;color:var(--g);font-weight:700;padding:10px 2px 8px;letter-spacing:1px;';h2.textContent='── البورصة ──';list.appendChild(h2);
-    liveAssets.forEach(a=>{const el=document.createElement('div');el.className='oi'+(s.assets.includes(a)?' sel':'');el.innerHTML=renderPairOption(a);el.onclick=()=>{if(s.assets.includes(a)){s.assets=s.assets.filter(x=>x!==a);el.classList.remove('sel');}else{if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');s.assets.push(a);el.classList.add('sel');}if(s.assets.length>0)s.asset=s.assets[0];updAssetLabel();updateConf();};list.appendChild(el);});
+    const allAssets=[...otcAssets,...liveAssets];
+    const groups={forex:[],commodities:[],crypto:[],stocks:[]};
+    allAssets.forEach(a=>{groups[classifyAssetKind(a)].push(a);});
+    const labels=(uiLang==='en')
+      ?{forex:'Currencies',commodities:'Commodities',crypto:'Crypto',stocks:'Stocks'}
+      :{forex:'العملات',commodities:'السلع',crypto:'العملات الرقمية',stocks:'الأسهم'};
+    const tabsOrder=['forex','commodities','crypto','stocks'];
+    const tabs=tabsOrder.filter(k=>groups[k].length>0);
+    let activeTab=tabs[0]||'forex';
+    const tabsWrap=document.createElement('div');
+    tabsWrap.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 10px;';
+    const assetsWrap=document.createElement('div');
+    list.appendChild(tabsWrap);
+    list.appendChild(assetsWrap);
+    const createAssetItem=(a)=>{
+      const el=document.createElement('div');
+      el.className='oi'+(s.assets.includes(a)?' sel':'');
+      el.innerHTML=renderPairOption(a);
+      el.onclick=()=>{
+        if(s.assets.includes(a)){
+          s.assets=s.assets.filter(x=>x!==a);
+          el.classList.remove('sel');
+        }else{
+          if(s.assets.length>=MAX_ASSETS)return toast('الحد الأقصى 3 أزواج','wa');
+          s.assets.push(a);
+          el.classList.add('sel');
+        }
+        if(s.assets.length>0)s.asset=s.assets[0];
+        updAssetLabel();
+        updateConf();
+      };
+      return el;
+    };
+    function renderActiveTab(){
+      assetsWrap.innerHTML='';
+      (groups[activeTab]||[]).forEach(a=>assetsWrap.appendChild(createAssetItem(a)));
+    }
+    tabs.forEach(tabKey=>{
+      const b=document.createElement('button');
+      b.type='button';
+      b.textContent=labels[tabKey];
+      b.style.cssText='border:1px solid rgba(77,183,255,.25);background:rgba(77,183,255,.08);color:var(--tx);padding:7px 12px;border-radius:11px;font-size:12px;font-weight:900;cursor:pointer;';
+      if(tabKey===activeTab)b.style.cssText+='background:linear-gradient(135deg,#4db7ff,#2979ff);border-color:rgba(41,121,255,.7);color:#fff;';
+      b.onclick=()=>{
+        activeTab=tabKey;
+        [...tabsWrap.children].forEach((x,i)=>{
+          const k=tabs[i];
+          x.style.cssText='border:1px solid rgba(77,183,255,.25);background:rgba(77,183,255,.08);color:var(--tx);padding:7px 12px;border-radius:11px;font-size:12px;font-weight:900;cursor:pointer;'+(k===activeTab?'background:linear-gradient(135deg,#4db7ff,#2979ff);border-color:rgba(41,121,255,.7);color:#fff;':'');
+        });
+        renderActiveTab();
+      };
+      tabsWrap.appendChild(b);
+    });
+    renderActiveTab();
     const conf=document.createElement('button');conf.style.cssText='width:100%;margin-top:14px;background:linear-gradient(135deg,var(--g),var(--g2));color:var(--bg);border:none;border-radius:13px;padding:14px;font-family:Roboto,sans-serif;font-size:14px;font-weight:900;cursor:pointer;';
     conf.onclick=()=>{if(s.assets.length===0){toast('اختر زوج واحد على الأقل','er');return;}updAssetLabel();cm(null,true);};
     function updateConf(){conf.textContent=`✅ تأكيد (${s.assets.length}/${MAX_ASSETS})`;}updateConf();
