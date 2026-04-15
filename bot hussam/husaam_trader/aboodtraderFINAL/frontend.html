@@ -871,9 +871,10 @@ const ASSETS_REFRESH_INTERVAL_MS=10*60*1000;
 const s={email:'',uid:'',rBal:0,dBal:0,currency:'USD',token:'',acc:'demo',asset:'EURUSD_otc',assets:[],strategy:'HUSAAM_EMA10',pOn:true,sOn:true,running:false,wins:0,losses:0,profit:0,pollInt:null,simT:null,sim:false,lastTradePopupId:null,hiddenLiveTradeId:null,availableAssets:{otc:[...DEFAULT_ASSETS_OTC],live:[...DEFAULT_ASSETS_LIVE],all:[...DEFAULT_ASSETS]},assetsAwaitingQuotex:false,assetsQuotexSynced:false,assetPayout:{},lastAssetsSyncAt:0,lastAssetsWarnAt:0,demoLimit:0,demoUsed:0,realMinBal:50,limitsInt:null};
 const MAX_ASSETS=3;
 const FIAT_FLAG={EUR:'eu',USD:'us',GBP:'gb',AUD:'au',JPY:'jp',CAD:'ca',NZD:'nz',CHF:'ch',MXN:'mx',TRY:'tr',ZAR:'za',CNY:'cn',CNH:'cn',HKD:'hk',SGD:'sg',NOK:'no',SEK:'se',DKK:'dk',PLN:'pl',RUB:'ru',INR:'in',BRL:'br',KRW:'kr',THB:'th',IDR:'id',PHP:'ph',MYR:'my',HUF:'hu',CZK:'cz',ILS:'il',AED:'ae',SAR:'sa',USDT:'us',USDC:'us',BUSD:'us',TUSD:'us',DAI:'us'};
-const QUOTE_SUFFIXES=['USDT','USDC','BUSD','TUSD','DAI','EUR','GBP','USD','JPY','AUD','CAD','CHF','NZD','MXN','TRY','ZAR','SEK','NOK','DKK','PLN','CNY','CNH','HKD','SGD','INR','RUB','BRL','KRW','THB','IDR','PHP','MYR','HUF','CZK','ILS','AED','SAR','ARS','BDT','COP','DZD','EGP','NGN','PKR'];
-const CRYPTO_ICON_BASE='https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/32/color';
-const CRYPTO_ICON_SLUG={BTC:'btc',ETH:'eth',BNB:'bnb',BCH:'bch',LTC:'ltc',XRP:'xrp',ADA:'ada',SOL:'sol',DOGE:'doge',TRX:'trx',DOT:'dot',LINK:'link',AVAX:'avax',AVA:'avax',ATOM:'atom',NEAR:'near',APT:'apt',ARB:'arb',OP:'op',XLM:'xlm',ETC:'etc',FIL:'fil',ICP:'icp',SHIB:'shib',UNI:'uni',AXS:'axs',MATIC:'matic',LRC:'lrc',APE:'ape',CRO:'cro',FTM:'ftm',ALGO:'algo',MANA:'mana',SAND:'sand',GRT:'grt',EOS:'eos',XTZ:'xtz',XMR:'xmr',ZEC:'zec',DASH:'dash',NEO:'neo',QTUM:'qtum',WAVES:'waves',THETA:'theta',VET:'vet',HBAR:'hbar',INJ:'inj',SUI:'sui',SEI:'sei',TIA:'tia',ORDI:'ordi',WIF:'wif',BONK:'bonk',PEPE:'pepe',FET:'fet',LUNA:'luna',RUNE:'rune',CRV:'crv',MKR:'mkr',SNX:'snx',COMP:'comp',YFI:'yfi',SUSHI:'sushi',AAVE:'aave',ENJ:'enj',CHZ:'chz',FLOW:'flow',GALA:'gala',IMX:'imx',STX:'stx',TWT:'twt',PAXG:'paxg','1INCH':'1inch'};
+const QUOTE_SUFFIXES=['USDT','USDC','BUSD','TUSD','DAI','EUR','GBP','USD','JPY','AUD','CAD','CHF','NZD','MXN','TRY','TRU','ZAR','SEK','NOK','DKK','PLN','CNY','CNH','HKD','SGD','INR','RUB','BRL','KRW','THB','IDR','PHP','MYR','HUF','CZK','ILS','AED','SAR','ARS','BDT','COP','DZD','EGP','NGN','PKR'];
+const CRYPTO_ICON_BASE='https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color';
+const CRYPTO_ICON_SLUG={BTC:'btc',ETH:'eth',BNB:'bnb',BCH:'bch',LTC:'ltc',XRP:'xrp',ADA:'ada',SOL:'sol',DOGE:'doge',TRX:'trx',DOT:'dot',LINK:'link',AVAX:'avax',AVA:'avax',ATOM:'atom',NEAR:'near',APT:'apt',ARB:'arb',OP:'op',XLM:'xlm',ETC:'etc',FIL:'fil',ICP:'icp',SHIB:'shib',UNI:'uni',AXS:'axs',MATIC:'matic',LRC:'lrc',APE:'ape',CRO:'cro',FTM:'ftm',ALGO:'algo',MANA:'mana',SAND:'sand',GRT:'grt',EOS:'eos',XTZ:'xtz',XMR:'xmr',ZEC:'zec',DASH:'dash',DAS:'dash',NEO:'neo',QTUM:'qtum',WAVES:'waves',THETA:'theta',VET:'vet',HBAR:'hbar',INJ:'inj',SUI:'sui',SEI:'sei',TIA:'tia',ORDI:'ordi',WIF:'wif',BONK:'bonk',PEPE:'pepe',FET:'fet',LUNA:'luna',RUNE:'rune',CRV:'crv',MKR:'mkr',SNX:'snx',COMP:'comp',YFI:'yfi',SUSHI:'sushi',AAVE:'aave',ENJ:'enj',CHZ:'chz',FLOW:'flow',GALA:'gala',IMX:'imx',STX:'stx',TWT:'twt',PAXG:'paxg','1INCH':'1inch'};
+const CRYPTO_DISPLAY_NAME={BTC:'Bitcoin',ETH:'Ethereum',BNB:'Binance Coin',BCH:'Bitcoin Cash',LTC:'Litecoin',XRP:'Ripple',ADA:'Cardano',SOL:'Solana',DOGE:'Dogecoin',TRX:'Tron',DOT:'Polkadot',LINK:'Chainlink',AVAX:'Avalanche',AVA:'Avalanche',ATOM:'Cosmos',NEAR:'Near Protocol',APT:'Aptos',ARB:'Arbitrum',OP:'Optimism',XLM:'Stellar',ETC:'Ethereum Classic',FIL:'Filecoin',ICP:'Internet Computer',SHIB:'Shiba Inu',UNI:'Uniswap',AXS:'Axie Infinity',MATIC:'Polygon',LRC:'Loopring',APE:'ApeCoin',CRO:'Cronos',FTM:'Fantom',ALGO:'Algorand',MANA:'Decentraland',SAND:'The Sandbox',GRT:'The Graph',EOS:'EOS',XTZ:'Tezos',XMR:'Monero',ZEC:'Zcash',DASH:'Dash',DAS:'Dash',NEO:'Neo',QTUM:'Qtum',WAVES:'Waves',THETA:'Theta',VET:'VeChain',HBAR:'Hedera',INJ:'Injective',SUI:'Sui',SEI:'Sei',TIA:'Celestia',ORDI:'ORDI',WIF:'dogwifhat',BONK:'Bonk',PEPE:'Pepe',FET:'Fetch.ai',LUNA:'Terra',RUNE:'THORChain',CRV:'Curve',MKR:'Maker',SNX:'Synthetix',COMP:'Compound',YFI:'Yearn Finance',SUSHI:'SushiSwap',AAVE:'Aave',ENJ:'Enjin Coin',CHZ:'Chiliz',FLOW:'Flow',GALA:'Gala',IMX:'Immutable',STX:'Stacks',TWT:'Trust Wallet Token',PAXG:'PAX Gold','1INCH':'1inch',TON:'Toncoin',ATO:'Ato',USDT:'Tether',USDC:'USD Coin',BUSD:'Binance USD',TUSD:'TrueUSD',DAI:'Dai'};
 const METAL_BADGE={XAU:'Au',XAG:'Ag',XPT:'Pt',XPD:'Pd'};
 const COMMODITY_BADGE={OIL:'Oil',WTI:'WTI',BRENT:'Br',NATGAS:'Ng',XBR:'Br',XTI:'WT',XNG:'Ng'};
 const COMMODITY_UI={
@@ -907,6 +908,7 @@ const STOCK_UI={
   MCD:{name:"McDonald's",logo:'https://logo.clearbit.com/mcdonalds.com'},
   FACEBOOKINC:{name:'Facebook Inc',logo:'https://logo.clearbit.com/meta.com'},
   FACEBOOK:{name:'Facebook Inc',logo:'https://logo.clearbit.com/meta.com'},
+  FB:{name:'Facebook',logo:'https://logo.clearbit.com/facebook.com'},
   META:{name:'Facebook Inc',logo:'https://logo.clearbit.com/meta.com'},
   AMERICANEXPRESS:{name:'American Express',logo:'https://logo.clearbit.com/americanexpress.com'},
   AXP:{name:'American Express',logo:'https://logo.clearbit.com/americanexpress.com'}
@@ -1043,6 +1045,11 @@ function stockKeyFromAssetParts(base,quote){
   if(STOCK_UI[q])return q;
   return null;
 }
+function displayTokenName(tok){
+  const u=String(tok||'').toUpperCase();
+  if(u==='TRU')return 'TRY';
+  return CRYPTO_DISPLAY_NAME[u]||u;
+}
 function pairLabel(asset){
   const{base,quote,otc}=splitBaseQuote(asset);
   const cKey=commodityKeyFromAssetParts(base,quote);
@@ -1057,7 +1064,7 @@ function pairLabel(asset){
     if(otc)t+=' (OTC)';
     return t;
   }
-  let t=quote?`${base}/${quote}`:base;
+  let t=quote?`${displayTokenName(base)}/${displayTokenName(quote)}`:displayTokenName(base);
   if(otc)t+=' (OTC)';
   return t;
 }
