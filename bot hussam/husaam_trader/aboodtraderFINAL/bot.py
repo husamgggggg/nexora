@@ -4215,6 +4215,8 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     _buy_retry_enabled = os.getenv("BOT_BUY_RETRY_ON_TIMEOUT", "1").strip().lower() in ("1", "true", "yes", "on")
                     _buy_retry_timeout = float(os.getenv("BOT_BUY_RETRY_TIMEOUT_SEC", "18") or 18)
                     _buy_retry_timeout = max(8.0, min(_buy_retry_timeout, 35.0))
+                    _buy_call_timeout = float(os.getenv("BOT_BUY_CALL_TIMEOUT_SEC", "35") or 35)
+                    _buy_call_timeout = max(10.0, min(_buy_call_timeout, 120.0))
                     try:
                         r = run_async_for(
                             S["email"],
@@ -4226,7 +4228,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                                 req.account_type,
                                 trade_duration_sec,
                             ),
-                            25,
+                            _buy_call_timeout,
                         )
                     except TimeoutError:
                         if _buy_retry_enabled:
@@ -4257,10 +4259,36 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                         S["status_msg"] = "⏸️ تعذر تنفيذ الصفقة حالياً — تخطي الإشارة"
                         log.warning("⚠️ buy failed: %s", ex)
                         continue
-                    if r["ok"]:
+                    if not r.get("ok"):
+                        _msg0 = str(r.get("msg", "") or "").strip()
+                        if _buy_retry_enabled and _msg0.lower() in ("", "none", "null"):
+                            log.warning("⚠️ نتيجة buy غير واضحة (%s) — إعادة محاولة أخيرة", _msg0 or "empty")
+                            try:
+                                time.sleep(1.0)
+                                r2 = run_async_for(
+                                    S["email"],
+                                    _do_trade(
+                                        S["client"],
+                                        chosen_asset,
+                                        req.amount,
+                                        direction,
+                                        req.account_type,
+                                        trade_duration_sec,
+                                    ),
+                                    _buy_retry_timeout,
+                                )
+                                if isinstance(r2, dict):
+                                    r = r2
+                            except Exception:
+                                S["status_msg"] = "⏸️ تعذر تنفيذ الصفقة (استجابة غير واضحة من Quotex) — تخطي الإشارة"
+                                log.warning("⚠️ buy ambiguous حتى بعد إعادة المحاولة — تخطّي الإشارة الحالية")
+                                continue
+                    if r.get("ok"):
                         tid = r.get("id")
                     else:
-                        msg = str(r.get("msg",""))
+                        msg = str(r.get("msg", "") or "").strip()
+                        if msg.lower() in ("", "none", "null"):
+                            msg = "تعذر تأكيد تنفيذ الصفقة من المنصة (رد غير واضح)"
                         log.warning(f"⚠️ {msg}")
                         if _is_time_insufficient_msg(msg):
                             S["status_msg"] = "⏸️ المنصة رفضت الدخول: الوقت غير كافٍ لهذه الإشارة"
