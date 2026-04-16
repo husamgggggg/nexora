@@ -2442,6 +2442,14 @@ def _is_live_asset(asset: str) -> bool:
     return not _is_otc_asset(asset)
 
 
+def _skip_quotex_candle_fetch_for_live_asset(asset: str) -> bool:
+    """عند LIVE+OANDA نقلل ضغط Quotex: لا حاجة لسحب history/v2 لكل زوج Live."""
+    if not (_oanda_live_feed_enabled() and _is_live_asset(asset)):
+        return False
+    v = os.getenv("LIVE_SKIP_QUOTEX_CANDLE_FETCH", "1").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
 _OANDA_ASSET_MAP = {
     "XAUUSD": "XAU_USD",
     "XAGUSD": "XAG_USD",
@@ -2599,17 +2607,18 @@ def _central_feeder_thread_main(asset: str, email: str, client_ref, stop_ev: thr
             pass
         now = time.time()
         if now - last_candle_t >= _cint:
-            try:
-                with _get_quotex_minute_fetch_lock_for_client(c):
-                    lst = run_async_for(
-                        email,
-                        _fetch_quotex_minute_candles_async(c, asset),
-                        _fto,
-                    )
-                if lst:
-                    _central_set_candles(asset, lst)
-            except Exception as e:
-                log.debug("سوق مركزي شموع %s: %s", asset, e)
+            if not _skip_quotex_candle_fetch_for_live_asset(asset):
+                try:
+                    with _get_quotex_minute_fetch_lock_for_client(c):
+                        lst = run_async_for(
+                            email,
+                            _fetch_quotex_minute_candles_async(c, asset),
+                            _fto,
+                        )
+                    if lst:
+                        _central_set_candles(asset, lst)
+                except Exception as e:
+                    log.debug("سوق مركزي شموع %s: %s", asset, e)
             last_candle_t = now
         time.sleep(0.4)
     with _central_rlock:
@@ -3730,6 +3739,8 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
         or ("120" if req.strategy == "LIVE" else "240")
     )
     force_entry_interval_sec = max(60.0, min(force_entry_interval_sec, 1800.0))
+    force_entry_retry_sec = float(os.getenv("BOT_FORCE_ENTRY_RETRY_SEC", "20") or 20)
+    force_entry_retry_sec = max(5.0, min(force_entry_retry_sec, 180.0))
     # إعادة تشغيل ذاتية عند تكرار حالة 0/N شموع 1m من الشارت (جلسة WS متدهورة غالباً)
     auto_restart_zero_candles_streak = int(
         os.getenv("BOT_AUTO_RESTART_ZERO_CANDLES_STREAK", "6") or 6
@@ -4062,7 +4073,13 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     _since_last_trade = (
                         time.time() - _last_trade_ts if _last_trade_ts > 0 else 0.0
                     )
-                    if _since_last_trade >= force_entry_interval_sec:
+                    _now_force = time.time()
+                    _last_force_try = float(S.get("_last_forced_entry_try_ts", 0) or 0)
+                    if (
+                        _since_last_trade >= force_entry_interval_sec
+                        and (_now_force - _last_force_try) >= force_entry_retry_sec
+                    ):
+                        S["_last_forced_entry_try_ts"] = _now_force
                         fb_best_score = -1
                         fb_best_dir = "wait"
                         fb_best_asset = None
@@ -4195,6 +4212,9 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 S["current_trade"] = trade
                 tid = None
                 if QX and S["logged_in"] and S["client"]:
+                    _buy_retry_enabled = os.getenv("BOT_BUY_RETRY_ON_TIMEOUT", "1").strip().lower() in ("1", "true", "yes", "on")
+                    _buy_retry_timeout = float(os.getenv("BOT_BUY_RETRY_TIMEOUT_SEC", "18") or 18)
+                    _buy_retry_timeout = max(8.0, min(_buy_retry_timeout, 35.0))
                     try:
                         r = run_async_for(
                             S["email"],
@@ -4209,9 +4229,30 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                             25,
                         )
                     except TimeoutError:
-                        S["status_msg"] = "⏸️ تعذر تنفيذ الصفقة (مهلة اتصال Quotex) — تخطي الإشارة"
-                        log.warning("⚠️ Timeout أثناء buy — تخطّي الإشارة الحالية")
-                        continue
+                        if _buy_retry_enabled:
+                            log.warning("⚠️ Timeout أثناء buy — إعادة محاولة أخيرة")
+                            try:
+                                time.sleep(1.0)
+                                r = run_async_for(
+                                    S["email"],
+                                    _do_trade(
+                                        S["client"],
+                                        chosen_asset,
+                                        req.amount,
+                                        direction,
+                                        req.account_type,
+                                        trade_duration_sec,
+                                    ),
+                                    _buy_retry_timeout,
+                                )
+                            except Exception:
+                                S["status_msg"] = "⏸️ تعذر تنفيذ الصفقة (مهلة اتصال Quotex) — تخطي الإشارة"
+                                log.warning("⚠️ Timeout أثناء buy حتى بعد إعادة المحاولة — تخطّي الإشارة الحالية")
+                                continue
+                        else:
+                            S["status_msg"] = "⏸️ تعذر تنفيذ الصفقة (مهلة اتصال Quotex) — تخطي الإشارة"
+                            log.warning("⚠️ Timeout أثناء buy — تخطّي الإشارة الحالية")
+                            continue
                     except Exception as ex:
                         S["status_msg"] = "⏸️ تعذر تنفيذ الصفقة حالياً — تخطي الإشارة"
                         log.warning("⚠️ buy failed: %s", ex)
@@ -4244,6 +4285,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             S["_last_entry_key"] = entry_key
             S["_last_entry_ts"] = time.time()
             S["_last_trade_open_ts"] = time.time()
+            S["_last_forced_entry_try_ts"] = 0.0
 
             # ── انتظار مدة الصفقة كاملة ───────────────────────────────────
             # مع صفقات مفتوحة: لا نخرج مبكراً بسبب stop — وإلا تُفتح صفقات على Quotex ولا تُسجَّل في wins/losses
