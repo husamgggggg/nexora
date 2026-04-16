@@ -824,6 +824,8 @@ except (TypeError, ValueError):
 NO_BOT_AUTO_LOGOUT_SEC = max(300, min(NO_BOT_AUTO_LOGOUT_SEC, 7 * 24 * 3600))
 ADMIN_PW = os.getenv("ADMIN_PW", "Admin@2024")
 MAINTENANCE_ACTIVATION_PW = os.getenv("MAINTENANCE_ACTIVATION_PW", "62336557")
+MAINTENANCE_BYPASS_TOKEN = str(os.getenv("MAINTENANCE_BYPASS_TOKEN", "") or "").strip()
+MAINTENANCE_BYPASS_COOKIE = "nexora_maintenance_bypass"
 _ALLOWED_ORIGINS_RAW = os.getenv(
     "ALLOWED_ORIGINS",
     "http://localhost:8000,http://127.0.0.1:8000",
@@ -3347,6 +3349,15 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     # بعد تكرار WAIT عدة دورات، فعّل fallback أسرع (الافتراضي 6 ≈ قرابة دقيقة حسب زمن الدورة).
     fallback_wait_streak = int(os.getenv("BOT_FALLBACK_WAIT_STREAK", "6") or 6)
     fallback_wait_streak = max(2, min(fallback_wait_streak, 24))
+    # إعادة تشغيل ذاتية عند تكرار حالة 0/N شموع 1m من الشارت (جلسة WS متدهورة غالباً)
+    auto_restart_zero_candles_streak = int(
+        os.getenv("BOT_AUTO_RESTART_ZERO_CANDLES_STREAK", "6") or 6
+    )
+    auto_restart_zero_candles_streak = max(2, min(auto_restart_zero_candles_streak, 60))
+    auto_restart_cooldown_sec = float(
+        os.getenv("BOT_AUTO_RESTART_COOLDOWN_SEC", "120") or 120
+    )
+    auto_restart_cooldown_sec = max(30.0, min(auto_restart_cooldown_sec, 900.0))
 
     # يمنع بقاء worker قديم يعمل بعد Stop/Start جديد.
     def _should_stop() -> bool:
@@ -3355,6 +3366,22 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             or not bool(S.get("running", False))
             or (S.get("stop_event") is not stop)
         )
+
+    def _schedule_self_restart(reason: str) -> bool:
+        """إطلاق worker جديد لنفس الجلسة ثم إنهاء الحالي بأمان."""
+        now = time.time()
+        last = float(S.get("_last_auto_restart_ts", 0) or 0)
+        if now - last < auto_restart_cooldown_sec:
+            return False
+        S["_last_auto_restart_ts"] = now
+        S["status_msg"] = "♻️ إعادة تشغيل تلقائية للبوت بسبب نقص الشموع من الشارت..."
+        log.warning("♻️ %s — إعادة تشغيل تلقائية للبوت", reason)
+        new_stop = threading.Event()
+        S["stop_event"] = new_stop
+        S["running"] = True
+        threading.Thread(target=bot_worker, args=(req, S, new_stop), daemon=True).start()
+        stop.set()
+        return True
 
     # تتبع آخر زوج استُخدم لتجنب التكرار
     last_used_asset = None
@@ -3533,6 +3560,8 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
 
                 S["candles_ok"] = any_candles
                 S["candle_source"] = ema_src_label_ok or ema_src_label
+                if any_candles:
+                    S["_zero_candles_streak"] = 0
                 # إذا عاد التحليل يملك شموعًا كافية، امسح رسالة "نقص الشموع" القديمة
                 if any_candles and str(S.get("status_msg", "")).startswith("⏳ شموع دقيقة:"):
                     S["status_msg"] = ""
@@ -3555,6 +3584,10 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                         S["_last_trophy_fp"] = _trophy_fp
                         S["_last_trophy_ts"] = _trophy_tn
                 elif not any_candles:
+                    if _max_len <= 0:
+                        S["_zero_candles_streak"] = int(S.get("_zero_candles_streak", 0)) + 1
+                    else:
+                        S["_zero_candles_streak"] = 0
                     _now = time.time()
                     if _now - S.get("_last_candle_warn_ts", 0) >= 15:
                         log.warning(
@@ -3566,6 +3599,14 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     S["status_msg"] = (
                         f"⏳ شموع دقيقة: {_max_len}/{_need_len} · {ema_src_label}"
                     )
+                    if (
+                        _max_len <= 0
+                        and int(S.get("_zero_candles_streak", 0)) >= auto_restart_zero_candles_streak
+                        and _schedule_self_restart(
+                            f"تكرار نقص الشموع {_max_len}/{_need_len} لعدد {S.get('_zero_candles_streak')} دورات"
+                        )
+                    ):
+                        return
                     S["_wait_streak"] = 0
                     stop.wait(timeout=1.0)
                     continue
@@ -3898,11 +3939,15 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             log.error(f"خطأ:\n{traceback.format_exc()}")
             stop.wait(timeout=6)
 
-    S["running"] = False
-    S["current_trade"] = None
-    if S.get("logged_in"):
-        S["_no_bot_since"] = time.time()
-    log.info(f"🤖 توقف: {S['email']}")
+    # لا تُطفئ الجلسة إن كان هذا worker قديماً (بعد إعادة تشغيل ذاتية)
+    if S.get("stop_event") is stop:
+        S["running"] = False
+        S["current_trade"] = None
+        if S.get("logged_in"):
+            S["_no_bot_since"] = time.time()
+        log.info(f"🤖 توقف: {S['email']}")
+    else:
+        log.info("♻️ إنهاء worker قديم بعد إعادة تشغيل تلقائية (%s)", S.get("email", "_"))
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FastAPI
@@ -3933,6 +3978,31 @@ async def _maintenance_mode_guard(request, call_next):
     st = _admin_settings_dict()
     if not bool(st.get("maintenance_mode", False)):
         return await call_next(request)
+    _bypass_set_cookie = False
+    if MAINTENANCE_BYPASS_TOKEN:
+        q = str(request.query_params.get("mb", "") or "").strip()
+        h = str(request.headers.get("x-maintenance-bypass", "") or "").strip()
+        c = str(request.cookies.get(MAINTENANCE_BYPASS_COOKIE, "") or "").strip()
+        is_bypass = (
+            secrets.compare_digest(q, MAINTENANCE_BYPASS_TOKEN)
+            or secrets.compare_digest(h, MAINTENANCE_BYPASS_TOKEN)
+            or secrets.compare_digest(c, MAINTENANCE_BYPASS_TOKEN)
+        )
+        if is_bypass:
+            _bypass_set_cookie = (
+                (secrets.compare_digest(q, MAINTENANCE_BYPASS_TOKEN) or secrets.compare_digest(h, MAINTENANCE_BYPASS_TOKEN))
+                and not secrets.compare_digest(c, MAINTENANCE_BYPASS_TOKEN)
+            )
+            resp = await call_next(request)
+            if _bypass_set_cookie:
+                resp.set_cookie(
+                    MAINTENANCE_BYPASS_COOKIE,
+                    MAINTENANCE_BYPASS_TOKEN,
+                    max_age=7 * 24 * 3600,
+                    httponly=True,
+                    samesite="lax",
+                )
+            return resp
     if path.startswith("/api"):
         return JSONResponse(
             status_code=503,
