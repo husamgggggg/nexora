@@ -1516,6 +1516,8 @@ _LIVE_SLOW_EMA = 21
 _LIVE_TREND_EMA = 55
 _LIVE_SCORE = 8
 _LIVE_TOUCH_TOL_PCT = 0.0012
+_LIVE_SR_LOOKBACK = 80
+_LIVE_SR_NEAR_PCT = 0.0015
 
 # ── HUSAAM: RSI + MACD (تآزر) + مدى شمعة vs وسيط + نافذة UTC — توازن بين جودة وعدد الإشارات ──
 _HUSAAM_STRICT_SCORE = 10
@@ -1960,65 +1962,159 @@ def _analyze_husaam_private_signal(candles) -> tuple:
     return "wait", 0
 
 
-def _analyze_live_signal(candles) -> tuple:
-    """
-    LIVE: اتجاه + Pullback/Breakout على شموع 1m مغلقة.
-    يهدف لعدد فرص أعلى من EMA10 مع الحفاظ على فلتر زخم أساسي.
-    """
+def _live_price_action_bullish(kit, i: int) -> bool:
+    if i < 1:
+        return False
+    c0 = kit[i]
+    p1 = kit[i - 1]
+    o = float(c0["open"]); h = float(c0["high"]); l = float(c0["low"]); cl = float(c0["close"])
+    po = float(p1["open"]); pc = float(p1["close"])
+    rng = max(h - l, 1e-12)
+    body = abs(cl - o)
+    # Bullish engulfing
+    if pc < po and cl > o and cl >= po and o <= pc:
+        return True
+    # Hammer
+    lower = min(o, cl) - l
+    upper = h - max(o, cl)
+    if body > 0 and lower >= body * 1.8 and upper <= body * 0.8 and cl >= o:
+        return True
+    return body / rng >= 0.55 and cl > o
+
+
+def _live_price_action_bearish(kit, i: int) -> bool:
+    if i < 1:
+        return False
+    c0 = kit[i]
+    p1 = kit[i - 1]
+    o = float(c0["open"]); h = float(c0["high"]); l = float(c0["low"]); cl = float(c0["close"])
+    po = float(p1["open"]); pc = float(p1["close"])
+    rng = max(h - l, 1e-12)
+    body = abs(cl - o)
+    # Bearish engulfing
+    if pc > po and cl < o and cl <= po and o >= pc:
+        return True
+    # Shooting star
+    upper = h - max(o, cl)
+    lower = min(o, cl) - l
+    if body > 0 and upper >= body * 1.8 and lower <= body * 0.8 and cl <= o:
+        return True
+    return body / rng >= 0.55 and cl < o
+
+
+def _analyze_live_core(candles) -> dict:
+    mode = str(os.getenv("LIVE_STRATEGY_MODE", "advanced") or "advanced").strip().lower()
     kit = _candles_ohlc_kit(_ema10_closed_only(candles))
     if len(kit) < _LIVE_MIN_BARS:
-        return "wait", 0
+        return {"qualified_dir": "wait", "qualified_score": 0, "soft_dir": "wait", "soft_score": 0, "confidence": 0}
     kit = kit[-_LIVE_MIN_BARS:]
     closes = [float(c["close"]) for c in kit]
+    highs = [float(c["high"]) for c in kit]
+    lows = [float(c["low"]) for c in kit]
     if len(closes) < _LIVE_MIN_BARS:
-        return "wait", 0
+        return {"qualified_dir": "wait", "qualified_score": 0, "soft_dir": "wait", "soft_score": 0, "confidence": 0}
     i = len(kit) - 1
     j = i - 1
     if j < 1:
-        return "wait", 0
+        return {"qualified_dir": "wait", "qualified_score": 0, "soft_dir": "wait", "soft_score": 0, "confidence": 0}
 
-    fast_i = _husaam_ema10_ema_at(closes, i, _LIVE_FAST_EMA)
-    slow_i = _husaam_ema10_ema_at(closes, i, _LIVE_SLOW_EMA)
-    trend_i = _husaam_ema10_ema_at(closes, i, _LIVE_TREND_EMA)
-    fast_j = _husaam_ema10_ema_at(closes, j, _LIVE_FAST_EMA)
-    slow_j = _husaam_ema10_ema_at(closes, j, _LIVE_SLOW_EMA)
-    trend_j = _husaam_ema10_ema_at(closes, j, _LIVE_TREND_EMA)
-    if min(fast_i, slow_i, trend_i, fast_j, slow_j, trend_j) <= 0:
-        return "wait", 0
+    ema10 = _husaam_ema10_ema_at(closes, i, 10)
+    ema20 = _husaam_ema10_ema_at(closes, i, 20)
+    ema50 = _husaam_ema10_ema_at(closes, i, 50)
+    if min(ema10, ema20, ema50) <= 0:
+        return {"qualified_dir": "wait", "qualified_score": 0, "soft_dir": "wait", "soft_score": 0, "confidence": 0}
 
     macd_line, signal_line, hist = calc_macd_series(closes)
     if macd_line is None:
-        return "wait", 0
+        return {"qualified_dir": "wait", "qualified_score": 0, "soft_dir": "wait", "soft_score": 0, "confidence": 0}
     rsi = calc_rsi(closes)
+    price = float(closes[i])
 
-    o_i = float(kit[i]["open"])
-    h_i = float(kit[i]["high"])
-    l_i = float(kit[i]["low"])
-    c_i = float(kit[i]["close"])
-    h_j = float(kit[j]["high"])
-    l_j = float(kit[j]["low"])
-    c_j = float(kit[j]["close"])
-    rng_i = max(h_i - l_i, 1e-12)
-    body_i = abs(c_i - o_i) / rng_i
-    tol_up = max(fast_j * _LIVE_TOUCH_TOL_PCT, 1e-12)
-    tol_dn = max(fast_j * _LIVE_TOUCH_TOL_PCT, 1e-12)
+    sr_lb = max(30, min(_LIVE_SR_LOOKBACK, len(kit)))
+    support = min(lows[-sr_lb:])
+    resistance = max(highs[-sr_lb:])
+    near_support = support > 0 and abs(price - support) / support <= _LIVE_SR_NEAR_PCT
+    near_resistance = resistance > 0 and abs(price - resistance) / resistance <= _LIVE_SR_NEAR_PCT
 
-    up_trend = fast_i > slow_i > trend_i and slow_i >= slow_j and trend_i >= trend_j
-    dn_trend = fast_i < slow_i < trend_i and slow_i <= slow_j and trend_i <= trend_j
+    macd_buy = macd_line[i] > signal_line[i] and macd_line[i] > 0 and hist[i] > 0
+    macd_sell = macd_line[i] < signal_line[i] and macd_line[i] < 0 and hist[i] < 0
+    rsi_buy = 45 <= rsi <= 70
+    rsi_sell = 30 <= rsi <= 55
+    ema_buy = price > ema10 > ema20 > ema50
+    ema_sell = price < ema10 < ema20 < ema50
+    pa_buy = _live_price_action_bullish(kit, i)
+    pa_sell = _live_price_action_bearish(kit, i)
 
-    pullback_up = l_j <= fast_j + tol_up and c_j >= slow_j * 0.9985
-    pullback_dn = h_j >= fast_j - tol_dn and c_j <= slow_j * 1.0015
-    breakout_up = c_i > h_j and body_i >= 0.32
-    breakout_dn = c_i < l_j and body_i >= 0.32
+    if mode == "ema_support_bounce":
+        buy_score = int((price > ema10 > ema50)) + int(rsi_buy) + int(near_support)
+        sell_score = int((price < ema10 < ema50)) + int(rsi_sell) + int(near_resistance)
+    elif mode == "macd_crossover":
+        buy_score = int(macd_line[i] > signal_line[i]) + int(hist[i] > 0) + int(macd_line[i] > 0)
+        sell_score = int(macd_line[i] < signal_line[i]) + int(hist[i] < 0) + int(macd_line[i] < 0)
+    elif mode == "price_action_sr":
+        buy_score = int(pa_buy) + int(near_support) + int(price >= ema20)
+        sell_score = int(pa_sell) + int(near_resistance) + int(price <= ema20)
+    else:
+        # advanced الافتراضية: 4/5 مطلوبة
+        buy_score = int(macd_buy) + int(rsi_buy) + int(ema_buy) + int(near_support) + int(pa_buy)
+        sell_score = int(macd_sell) + int(rsi_sell) + int(ema_sell) + int(near_resistance) + int(pa_sell)
 
-    up_mom = hist[i] > 0 and hist[i] >= hist[j] and macd_line[i] >= signal_line[i]
-    dn_mom = hist[i] < 0 and hist[i] <= hist[j] and macd_line[i] <= signal_line[i]
+    soft_dir = "wait"
+    soft_score = 0
+    if buy_score > sell_score:
+        soft_dir, soft_score = "call", int(buy_score)
+    elif sell_score > buy_score:
+        soft_dir, soft_score = "put", int(sell_score)
 
-    if up_trend and up_mom and 45 <= rsi <= 76 and c_i >= fast_i and (pullback_up or breakout_up):
-        return "call", _LIVE_SCORE
-    if dn_trend and dn_mom and 24 <= rsi <= 55 and c_i <= fast_i and (pullback_dn or breakout_dn):
-        return "put", _LIVE_SCORE
-    return "wait", 0
+    qualified_dir = "wait"
+    qualified_score = 0
+    confidence = 0
+    if mode == "advanced":
+        if buy_score >= 4 and sell_score >= 4:
+            qualified_dir = "wait"
+        elif buy_score >= 4 and buy_score > sell_score:
+            confidence = int((buy_score / 5.0) * 100.0)
+            if confidence >= 70:
+                qualified_dir = "call"
+                qualified_score = int(buy_score + _LIVE_SCORE)
+        elif sell_score >= 4 and sell_score > buy_score:
+            confidence = int((sell_score / 5.0) * 100.0)
+            if confidence >= 70:
+                qualified_dir = "put"
+                qualified_score = int(sell_score + _LIVE_SCORE)
+    else:
+        req_min = 2
+        max_possible = 3
+        if buy_score >= req_min and buy_score > sell_score:
+            confidence = int((buy_score / float(max_possible)) * 100.0)
+            if confidence >= 70:
+                qualified_dir = "call"
+                qualified_score = int(buy_score + _LIVE_SCORE - 1)
+        elif sell_score >= req_min and sell_score > buy_score:
+            confidence = int((sell_score / float(max_possible)) * 100.0)
+            if confidence >= 70:
+                qualified_dir = "put"
+                qualified_score = int(sell_score + _LIVE_SCORE - 1)
+
+    return {
+        "qualified_dir": qualified_dir,
+        "qualified_score": int(qualified_score),
+        "soft_dir": soft_dir,
+        "soft_score": int(soft_score),
+        "buy_score": int(buy_score),
+        "sell_score": int(sell_score),
+        "confidence": int(confidence),
+    }
+
+
+def _analyze_live_signal(candles) -> tuple:
+    core = _analyze_live_core(candles)
+    return core["qualified_dir"], int(core["qualified_score"])
+
+
+def _analyze_live_soft_candidate(candles) -> tuple:
+    core = _analyze_live_core(candles)
+    return core["soft_dir"], int(core["soft_score"])
 
 
 def analyze(candles, strategy) -> str:
@@ -3629,7 +3725,10 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     fallback_wait_streak = int(os.getenv("BOT_FALLBACK_WAIT_STREAK", "6") or 6)
     fallback_wait_streak = max(2, min(fallback_wait_streak, 24))
     # حد أقصى للانتظار بين الصفقات: إذا لا توجد إشارة تُؤخذ صفقة باتجاه السوق بعد هذا الزمن.
-    force_entry_interval_sec = float(os.getenv("BOT_FORCE_ENTRY_INTERVAL_SEC", "240") or 240)
+    force_entry_interval_sec = float(
+        os.getenv("BOT_FORCE_ENTRY_INTERVAL_SEC", "120" if req.strategy == "LIVE" else "240")
+        or ("120" if req.strategy == "LIVE" else "240")
+    )
     force_entry_interval_sec = max(60.0, min(force_entry_interval_sec, 1800.0))
     # إعادة تشغيل ذاتية عند تكرار حالة 0/N شموع 1m من الشارت (جلسة WS متدهورة غالباً)
     auto_restart_zero_candles_streak = int(
@@ -3791,6 +3890,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 ema_src_label_ok = ""
                 _need_len_dynamic = _need_len
                 _scan_rows = []  # (asset, dir, score) لبصمة دورة كاملة — يمنع تكرار 🔍 كل ثانية
+                _live_soft_rows = []  # (asset, dir, soft_score) لفرض دخول LIVE بعد المهلة
                 for a in all_assets:
                     _analysis_target = (
                         _HUSAAM_PRIVATE_MIN_BARS
@@ -3844,6 +3944,10 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                         any_candles = True
                         if _csrc not in ("quotex_insufficient", "oanda_insufficient", "oanda_unmapped"):
                             ema_src_label_ok = ema_src_label
+                        if req.strategy == "LIVE":
+                            _sd, _ss = _analyze_live_soft_candidate(candles)
+                            if _sd != "wait":
+                                _live_soft_rows.append((a, _sd, int(_ss)))
                         d, score = analyze_score(candles, req.strategy)
                         _scan_rows.append((a, d, score))
                         if d != "wait" and score > best_score:
@@ -3959,27 +4063,43 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                         time.time() - _last_trade_ts if _last_trade_ts > 0 else 0.0
                     )
                     if _since_last_trade >= force_entry_interval_sec:
-                        fb_best_score = 0
+                        fb_best_score = -1
                         fb_best_dir = "wait"
                         fb_best_asset = None
-                        for a, cs in candles_by_asset.items():
-                            d2, s2 = _fallback_direction_from_candles(cs)
-                            if d2 != "wait" and s2 >= fb_best_score:
-                                fb_best_score = s2
-                                fb_best_dir = d2
-                                fb_best_asset = a
+                        if req.strategy == "LIVE":
+                            for a, d2, s2 in _live_soft_rows:
+                                if d2 != "wait" and s2 >= fb_best_score:
+                                    fb_best_score = int(s2)
+                                    fb_best_dir = d2
+                                    fb_best_asset = a
+                        else:
+                            for a, cs in candles_by_asset.items():
+                                d2, s2 = _fallback_direction_from_candles(cs)
+                                if d2 != "wait" and s2 >= fb_best_score:
+                                    fb_best_score = int(s2)
+                                    fb_best_dir = d2
+                                    fb_best_asset = a
+                        _min_force_score = 2 if req.strategy == "LIVE" else 1
                         if fb_best_asset and fb_best_dir != "wait":
-                            direction = fb_best_dir
-                            chosen_asset = fb_best_asset
-                            S["_wait_streak"] = 0
-                            S["status_msg"] = "⚡ دخول تلقائي باتجاه السوق بعد انتظار 4 دقائق"
-                            log.info(
-                                "⚡ Forced trend entry بعد %.0fs: %s → %s (score=%s)",
-                                _since_last_trade,
-                                chosen_asset,
-                                direction.upper(),
-                                fb_best_score,
-                            )
+                            if fb_best_score >= _min_force_score:
+                                direction = fb_best_dir
+                                chosen_asset = fb_best_asset
+                                S["_wait_streak"] = 0
+                                S["status_msg"] = "⚡ دخول تلقائي باتجاه السوق بعد انتظار دقيقتين"
+                                log.info(
+                                    "⚡ Forced trend entry بعد %.0fs: %s → %s (score=%s)",
+                                    _since_last_trade,
+                                    chosen_asset,
+                                    direction.upper(),
+                                    fb_best_score,
+                                )
+                            else:
+                                log.info(
+                                    "⏳ انتهت مهلة %.0fs لكن أعلى score=%s أقل من الحد الأدنى %s",
+                                    force_entry_interval_sec,
+                                    fb_best_score,
+                                    _min_force_score,
+                                )
                         else:
                             log.info(
                                 "⏳ انتهت مهلة %.0fs بدون إشارة، لكن اتجاه السوق غير واضح بعد",
