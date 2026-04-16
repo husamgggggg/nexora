@@ -2251,7 +2251,7 @@ _WARMUP_COLLECT_SEC_EMA10 = 25
 
 # OANDA (Live فقط): تحليل من 100 شمعة M1 ثم تنفيذ على Quotex
 _OANDA_DEFAULT_API_URL = "https://api-fxpractice.oanda.com"
-_OANDA_DEFAULT_CANDLE_COUNT = 100
+_OANDA_DEFAULT_CANDLE_COUNT = 240
 
 
 def _oanda_live_feed_enabled() -> bool:
@@ -2773,7 +2773,7 @@ def _get_oanda_ema10_candles(asset: str, need_len: int, analysis_bars=None) -> t
     _fetch_min_iv = float(os.getenv("OANDA_CANDLE_FETCH_MIN_INTERVAL_SEC", "8") or 8)
     _fetch_min_iv = max(4.0, min(_fetch_min_iv, 20.0))
     _count = int(os.getenv("OANDA_CANDLE_COUNT", str(_OANDA_DEFAULT_CANDLE_COUNT)) or _OANDA_DEFAULT_CANDLE_COUNT)
-    _count = max(100, min(_count, 500))
+    _count = max(max(100, tgt + 20), min(_count, 500))
 
     def _finalize(raw: list, label: str, instrument: str = "") -> tuple:
         prep = _prepare_husaam_ema10_candles_for_analysis(raw, max_bars=tgt)
@@ -3704,9 +3704,12 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     else _HUSAAM_EMA10_ANALYSIS_BARS
                 )
                 _need_len = _min_bars
+                _oanda_analysis_bars = int(os.getenv("OANDA_ANALYSIS_BARS", "200") or 200)
+                _oanda_analysis_bars = max(_need_len, min(_oanda_analysis_bars, 500))
                 _max_len = 0
                 ema_src_label = ""
                 ema_src_label_ok = ""
+                _need_len_dynamic = _need_len
                 _scan_rows = []  # (asset, dir, score) لبصمة دورة كاملة — يمنع تكرار 🔍 كل ثانية
                 for a in all_assets:
                     _analysis_target = (
@@ -3715,6 +3718,11 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                         else _HUSAAM_EMA10_ANALYSIS_BARS
                     )
                     _use_oanda_live = _oanda_live_feed_enabled() and _is_live_asset(a)
+                    if _use_oanda_live:
+                        _analysis_target = max(_analysis_target, _oanda_analysis_bars)
+                    _need_for_asset = _analysis_target if _use_oanda_live else _need_len
+                    if _need_for_asset > _need_len_dynamic:
+                        _need_len_dynamic = _need_for_asset
                     if _use_oanda_live:
                         candles, _csrc = _get_oanda_ema10_candles(
                             a,
@@ -3752,7 +3760,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                         ema_src_label = str(_csrc)
                     _max_len = max(_max_len, len(candles))
                     candles_by_asset[a] = candles
-                    if len(candles) >= _need_len:
+                    if len(candles) >= _need_for_asset:
                         any_candles = True
                         if _csrc not in ("quotex_insufficient", "oanda_insufficient", "oanda_unmapped"):
                             ema_src_label_ok = ema_src_label
@@ -3811,17 +3819,17 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                         log.warning(
                             "⚠️ شمعات غير كافية للتحليل — لديك %s/%s شمعة 1m (مطلوب من مصدر التحليل لا من التيك)",
                             _max_len,
-                            _need_len,
+                            _need_len_dynamic,
                         )
                         S["_last_candle_warn_ts"] = _now
                     S["status_msg"] = (
-                        f"⏳ شموع دقيقة: {_max_len}/{_need_len} · {ema_src_label}"
+                        f"⏳ شموع دقيقة: {_max_len}/{_need_len_dynamic} · {ema_src_label}"
                     )
                     if (
                         _max_len <= 0
                         and int(S.get("_zero_candles_streak", 0)) >= auto_restart_zero_candles_streak
                         and _schedule_self_restart(
-                            f"تكرار نقص الشموع {_max_len}/{_need_len} لعدد {S.get('_zero_candles_streak')} دورات"
+                            f"تكرار نقص الشموع {_max_len}/{_need_len_dynamic} لعدد {S.get('_zero_candles_streak')} دورات"
                         )
                     ):
                         return
