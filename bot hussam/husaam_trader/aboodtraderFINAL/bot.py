@@ -3759,19 +3759,51 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             total_prf = 0.0
             for trade, tid in opened_trades:
                 stake = float(trade.get("amount") or req.amount or 0)
+                settled = False
                 try:
                     if QX and tid and S["client"]:
                         r2 = run_async_for(S["email"], _check_win(S["client"], tid), 25)
                         win = r2["win"]
                         prf = _session_trade_pnl(win, stake, float(r2.get("profit") or 0))
+                        settled = True
                     else:
                         win = random.random() < 0.58
                         raw_sim = round(stake * 0.80, 2) if win else 0.0
                         prf = _session_trade_pnl(win, stake, raw_sim)
+                        settled = True
                 except Exception as ex:
-                    log.warning("⚠️ تعذر تسوية صفقة (id=%s): %s — تُحتسب خسارة تقريبية", tid, ex)
-                    win = False
-                    prf = _session_trade_pnl(False, stake, 0.0)
+                    if QX and tid and S["client"]:
+                        log.warning("⚠️ تعذر تسوية صفقة (id=%s): %s — إعادة محاولة أخيرة", tid, ex)
+                        try:
+                            time.sleep(2)
+                            r2 = run_async_for(S["email"], _check_win(S["client"], tid), 20)
+                            win = r2["win"]
+                            prf = _session_trade_pnl(win, stake, float(r2.get("profit") or 0))
+                            settled = True
+                            log.info("✅ تمّت تسوية الصفقة بعد إعادة المحاولة (id=%s)", tid)
+                        except Exception as ex2:
+                            log.warning(
+                                "⚠️ تعذر تسوية صفقة (id=%s): %s — ستبقى معلّقة بدون احتساب خسارة تقديرية",
+                                tid, ex2
+                            )
+                            settled = False
+                    else:
+                        win = False
+                        prf = _session_trade_pnl(False, stake, 0.0)
+                        settled = True
+
+                if not settled:
+                    trade.update({
+                        "status": "pending",
+                        "profit": 0.0,
+                        "ended_at": datetime.now().isoformat(),
+                        "settlement_pending": True,
+                    })
+                    S["trades"].insert(0, dict(trade))
+                    if len(S["trades"]) > 200:
+                        S["trades"].pop()
+                    log.info("🕒 صفقة معلّقة بانتظار نتيجة المنصة (id=%s)", tid)
+                    continue
 
                 prf = round(prf, 2)
                 total_prf += prf
