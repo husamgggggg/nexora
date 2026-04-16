@@ -56,6 +56,7 @@ except ImportError as e:
 
 # تشخيص آخر جلب شموع / WebSocket (للوج)
 _HUSAAM_WS_LAST: dict = {}
+_oanda_warn_log_ts: dict = {}
 
 
 def _install_pyquotex_ws_on_message_fix():
@@ -2248,6 +2249,66 @@ def _session_ema_cache_key(email: str, asset: str) -> tuple:
 _WARMUP_COLLECT_SEC = 180
 _WARMUP_COLLECT_SEC_EMA10 = 25
 
+# OANDA (Live فقط): تحليل من 100 شمعة M1 ثم تنفيذ على Quotex
+_OANDA_DEFAULT_API_URL = "https://api-fxpractice.oanda.com"
+_OANDA_DEFAULT_CANDLE_COUNT = 100
+
+
+def _oanda_live_feed_enabled() -> bool:
+    v = os.getenv("OANDA_LIVE_FEED_ENABLED", "").strip().lower()
+    if v in ("1", "true", "yes", "on"):
+        return True
+    if v in ("0", "false", "no", "off"):
+        return False
+    return bool(str(os.getenv("OANDA_API_KEY", "") or "").strip())
+
+
+def _is_otc_asset(asset: str) -> bool:
+    s = str(asset or "").strip().lower()
+    return ("_otc" in s) or ("(otc" in s)
+
+
+def _is_live_asset(asset: str) -> bool:
+    return not _is_otc_asset(asset)
+
+
+_OANDA_ASSET_MAP = {
+    "XAUUSD": "XAU_USD",
+    "XAGUSD": "XAG_USD",
+    "UKBRENT": "BCO_USD",
+    "BRENT": "BCO_USD",
+    "USOIL": "WTICO_USD",
+    "WTI": "WTICO_USD",
+}
+_OANDA_QUOTE_SUFFIXES = (
+    "USDT", "USDC", "BUSD", "TUSD", "DAI", "CNH",
+    "USD", "EUR", "JPY", "GBP", "AUD", "CAD", "CHF", "NZD",
+    "TRY", "SEK", "NOK", "DKK", "PLN", "ZAR", "HKD", "SGD",
+)
+
+
+def _asset_to_oanda_instrument(asset: str) -> str:
+    raw = str(asset or "").strip().upper()
+    if not raw:
+        return ""
+    raw = raw.replace("(OTC)", "").replace("_OTC", "").replace("-", "").replace(" ", "")
+    if raw in _OANDA_ASSET_MAP:
+        return _OANDA_ASSET_MAP[raw]
+    if "/" in raw:
+        p = [x for x in raw.split("/") if x]
+        if len(p) == 2:
+            return f"{p[0]}_{p[1]}"
+    if "_" in raw:
+        p = [x for x in raw.split("_") if x]
+        if len(p) == 2:
+            return f"{p[0]}_{p[1]}"
+    for q in _OANDA_QUOTE_SUFFIXES:
+        if raw.endswith(q) and len(raw) > len(q):
+            base = raw[: -len(q)]
+            if 2 <= len(base) <= 8:
+                return f"{base}_{q}"
+    return ""
+
 
 def _central_market_enabled() -> bool:
     """طبقة سوق مركزية: زوج واحد = مغذّي واحد؛ الحسابات تقرأ فقط (بدون التحكم بستريم غيرهم)."""
@@ -2617,6 +2678,150 @@ _husaam_ema10_analysis_log_ts: dict = {}  # (email, asset) -> وقت آخر log 
 _husaam_ema10_pipeline_log_ts: dict = {}  # (asset,current_asset) -> آخر وقت log pipeline
 _husaam_micro_candle_cache: dict = {}  # (email, asset, period) -> {t, candles}
 _husaam_last_fetch_ts: dict = {}  # (email, asset) -> آخر وقت محاولة fetch من Quotex
+_oanda_candle_cache: dict = {}  # asset -> {t, candles, instrument}
+_oanda_last_fetch_ts: dict = {}  # asset -> آخر وقت محاولة fetch من OANDA
+
+
+def _parse_oanda_time_to_ts(v) -> float:
+    s = str(v or "").strip()
+    if not s:
+        return 0.0
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _fetch_oanda_m1_candles(asset: str, count: int = _OANDA_DEFAULT_CANDLE_COUNT) -> tuple:
+    """
+    يجلب شموع M1 من OANDA.
+    يعيد (rows, instrument).
+    """
+    api_key = str(os.getenv("OANDA_API_KEY", "") or "").strip()
+    if not api_key:
+        return [], ""
+    instrument = _asset_to_oanda_instrument(asset)
+    if not instrument:
+        return [], ""
+    base_url = str(os.getenv("OANDA_API_URL", _OANDA_DEFAULT_API_URL) or _OANDA_DEFAULT_API_URL).strip().rstrip("/")
+    timeout_sec = float(os.getenv("OANDA_HTTP_TIMEOUT_SEC", "8") or 8)
+    timeout_sec = max(3.0, min(timeout_sec, 30.0))
+    c = max(40, min(int(count or _OANDA_DEFAULT_CANDLE_COUNT), 500))
+    q = urllib.parse.urlencode({"price": "M", "granularity": "M1", "count": str(c)})
+    url = f"{base_url}/v3/instruments/{urllib.parse.quote(instrument, safe='')}/candles?{q}"
+    req = urllib.request.Request(
+        url=url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "User-Agent": "NEXORA-TRADE/1.0",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+        data = json.loads(raw) if raw else {}
+    except Exception as e:
+        _iv = float(os.getenv("OANDA_WARN_LOG_INTERVAL_SEC", "15") or 15)
+        _iv = max(5.0, min(_iv, 120.0))
+        _k = f"fetch:{instrument}"
+        _tn = time.time()
+        if _tn - float(_oanda_warn_log_ts.get(_k, 0.0) or 0.0) >= _iv:
+            log.warning("OANDA fetch failed (%s): %s", instrument, e)
+            _oanda_warn_log_ts[_k] = _tn
+        return [], instrument
+    out = []
+    for cnd in data.get("candles") or []:
+        if not isinstance(cnd, dict):
+            continue
+        if cnd.get("complete") is False:
+            continue
+        mid = cnd.get("mid") or {}
+        try:
+            o = float(mid.get("o", 0) or 0)
+            h = float(mid.get("h", 0) or 0)
+            l = float(mid.get("l", 0) or 0)
+            cl = float(mid.get("c", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if cl <= 0:
+            continue
+        hi = max(o, h, l, cl)
+        lo = min(o, h, l, cl)
+        ts = _parse_oanda_time_to_ts(cnd.get("time"))
+        row = {"open": o, "high": hi, "low": lo, "close": cl}
+        if ts > 0:
+            row["time"] = ts
+        out.append(row)
+    out = _sort_candles_by_time(out)
+    return out, instrument
+
+
+def _get_oanda_ema10_candles(asset: str, need_len: int, analysis_bars=None) -> tuple:
+    """يعيد (شموع للتحليل, مصدر) من OANDA لسوق Live فقط."""
+    tgt = analysis_bars if analysis_bars is not None else _HUSAAM_EMA10_ANALYSIS_BARS
+    if tgt < need_len:
+        tgt = need_len
+    now = time.time()
+    _ck = str(asset or "").upper()
+    ce = _oanda_candle_cache.get(_ck)
+    _short_cache_sec = float(os.getenv("OANDA_CANDLE_SHORT_CACHE_SEC", "1.5") or 1.5)
+    _short_cache_sec = max(0.5, min(_short_cache_sec, 3.0))
+    _fetch_min_iv = float(os.getenv("OANDA_CANDLE_FETCH_MIN_INTERVAL_SEC", "8") or 8)
+    _fetch_min_iv = max(4.0, min(_fetch_min_iv, 20.0))
+    _count = int(os.getenv("OANDA_CANDLE_COUNT", str(_OANDA_DEFAULT_CANDLE_COUNT)) or _OANDA_DEFAULT_CANDLE_COUNT)
+    _count = max(100, min(_count, 500))
+
+    def _finalize(raw: list, label: str, instrument: str = "") -> tuple:
+        prep = _prepare_husaam_ema10_candles_for_analysis(raw, max_bars=tgt)
+        if len(prep) < tgt:
+            return [], label + "_insufficient"
+        out = prep[-tgt:] if len(prep) > tgt else prep
+        _t0 = out[0].get("time")
+        _t1 = out[-1].get("time")
+        log.info(
+            "📊 OANDA analysis: مطلوب=%s instrument=%s need=%s got=%s first_ts=%s last_ts=%s src=%s",
+            asset,
+            instrument or "-",
+            tgt,
+            len(out),
+            int(_t0) if _t0 is not None else None,
+            int(_t1) if _t1 is not None else None,
+            label,
+        )
+        return out, label
+
+    if ce and (now - float(ce.get("t", 0.0) or 0.0)) < _short_cache_sec:
+        got, lab = _finalize(ce.get("candles") or [], "oanda_1m_cache", ce.get("instrument") or "")
+        if got:
+            return got, lab
+
+    _last_fetch = float(_oanda_last_fetch_ts.get(_ck, 0.0) or 0.0)
+    if _last_fetch > 0.0 and (now - _last_fetch) < _fetch_min_iv:
+        if ce and ce.get("candles"):
+            got, lab = _finalize(ce.get("candles") or [], "oanda_1m_throttle_cache", ce.get("instrument") or "")
+            if got:
+                return got, lab
+
+    _oanda_last_fetch_ts[_ck] = time.time()
+    rows, instrument = _fetch_oanda_m1_candles(asset, count=_count)
+    if rows:
+        _oanda_candle_cache[_ck] = {"t": time.time(), "candles": rows, "instrument": instrument}
+        got, lab = _finalize(rows, "oanda_1m", instrument)
+        if got:
+            return got, lab
+    if ce and ce.get("candles"):
+        got, lab = _finalize(ce.get("candles") or [], "oanda_stale_cache", ce.get("instrument") or "")
+        if got:
+            return got, lab
+    if not instrument:
+        log.warning("OANDA: لا يمكن مطابقة الزوج %s إلى instrument مدعوم", asset)
+        return [], "oanda_unmapped"
+    log.warning("OANDA: بيانات غير كافية لزوج %s (%s)", asset, instrument)
+    return [], "oanda_insufficient"
 
 
 def _normalize_quotex_candle_row(c):
@@ -3504,7 +3709,19 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 ema_src_label_ok = ""
                 _scan_rows = []  # (asset, dir, score) لبصمة دورة كاملة — يمنع تكرار 🔍 كل ثانية
                 for a in all_assets:
-                    if req.strategy == "HUSAAM_PRIVATE":
+                    _analysis_target = (
+                        _HUSAAM_PRIVATE_MIN_BARS
+                        if req.strategy == "HUSAAM_PRIVATE"
+                        else _HUSAAM_EMA10_ANALYSIS_BARS
+                    )
+                    _use_oanda_live = _oanda_live_feed_enabled() and _is_live_asset(a)
+                    if _use_oanda_live:
+                        candles, _csrc = _get_oanda_ema10_candles(
+                            a,
+                            _need_len,
+                            analysis_bars=_analysis_target,
+                        )
+                    elif req.strategy == "HUSAAM_PRIVATE":
                         candles, _csrc = _get_husaam_ema10_candles(
                             S["client"],
                             S["email"],
@@ -3512,31 +3729,32 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                             _need_len,
                             analysis_bars=_HUSAAM_PRIVATE_MIN_BARS,
                         )
-                        if _csrc in ("quotex_1m", "quotex_1m_cache"):
-                            ema_src_label = "شموع Quotex 1m — NEXORA Private"
-                        elif _csrc == "quotex_stale_cache":
-                            ema_src_label = "شموع 1m — كاش احتياطي"
-                        elif _csrc == "sim_tick_1m":
-                            ema_src_label = "محاكاة (تيك)"
-                        else:
-                            ema_src_label = str(_csrc)
                     else:
                         candles, _csrc = _get_husaam_ema10_candles(
                             S["client"], S["email"], a, _need_len
                         )
-                        if _csrc in ("quotex_1m", "quotex_1m_cache"):
-                            ema_src_label = "شموع Quotex 1m (شارت)"
-                        elif _csrc == "quotex_stale_cache":
-                            ema_src_label = "شموع 1m — كاش احتياطي"
-                        elif _csrc == "sim_tick_1m":
-                            ema_src_label = "محاكاة (تيك)"
-                        else:
-                            ema_src_label = str(_csrc)
+
+                    if _csrc in ("oanda_1m", "oanda_1m_cache", "oanda_1m_throttle_cache"):
+                        ema_src_label = "شموع OANDA 1m (Live)"
+                    elif _csrc == "oanda_stale_cache":
+                        ema_src_label = "شموع OANDA 1m — كاش احتياطي"
+                    elif _csrc in ("quotex_1m", "quotex_1m_cache"):
+                        ema_src_label = (
+                            "شموع Quotex 1m — NEXORA Private"
+                            if req.strategy == "HUSAAM_PRIVATE"
+                            else "شموع Quotex 1m (شارت)"
+                        )
+                    elif _csrc == "quotex_stale_cache":
+                        ema_src_label = "شموع 1m — كاش احتياطي"
+                    elif _csrc == "sim_tick_1m":
+                        ema_src_label = "محاكاة (تيك)"
+                    else:
+                        ema_src_label = str(_csrc)
                     _max_len = max(_max_len, len(candles))
                     candles_by_asset[a] = candles
                     if len(candles) >= _need_len:
                         any_candles = True
-                        if _csrc not in ("quotex_insufficient",):
+                        if _csrc not in ("quotex_insufficient", "oanda_insufficient", "oanda_unmapped"):
                             ema_src_label_ok = ema_src_label
                         d, score = analyze_score(candles, req.strategy)
                         _scan_rows.append((a, d, score))
@@ -3591,7 +3809,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     _now = time.time()
                     if _now - S.get("_last_candle_warn_ts", 0) >= 15:
                         log.warning(
-                            "⚠️ شمعات غير كافية للتحليل — لديك %s/%s شمعة 1m (مطلوب من الشارت لا من التيك)",
+                            "⚠️ شمعات غير كافية للتحليل — لديك %s/%s شمعة 1m (مطلوب من مصدر التحليل لا من التيك)",
                             _max_len,
                             _need_len,
                         )
