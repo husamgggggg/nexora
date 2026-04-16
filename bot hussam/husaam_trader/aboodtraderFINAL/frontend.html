@@ -1010,9 +1010,8 @@ function tickSimPayouts(){
 setInterval(tickSimPayouts, 9000);
 const STRATEGIES=[
   {key:'HUSAAM_EMA10',label:'PREMIUM'},
-  {key:'LIVE',label:'LIVE'},
 ];
-const STRAT_LABELS={HUSAAM_EMA10:'PREMIUM',HUSAAM:'PREMIUM',LIVE:'LIVE'};
+const STRAT_LABELS={HUSAAM_EMA10:'PREMIUM',HUSAAM:'PREMIUM'};
 (function ensureStrategyKey(){
   if(!STRATEGIES.some(st=>st.key===s.strategy))s.strategy=STRATEGIES[0].key;
   const vs=document.getElementById('vStrat');if(vs)vs.textContent=STRAT_LABELS[s.strategy]||STRATEGIES[0].label;
