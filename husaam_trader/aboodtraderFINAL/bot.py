@@ -1509,6 +1509,14 @@ _HUSAAM_PRIVATE_MIN_BARS = 55
 _HUSAAM_PRIVATE_TREND_EMA = 21
 _HUSAAM_PRIVATE_SCORE = 10
 
+# ── استراتيجية LIVE (لأسواق Live): أكثر نشاطاً مع فلترة اتجاه/زخم ──
+_LIVE_MIN_BARS = 200
+_LIVE_FAST_EMA = 9
+_LIVE_SLOW_EMA = 21
+_LIVE_TREND_EMA = 55
+_LIVE_SCORE = 8
+_LIVE_TOUCH_TOL_PCT = 0.0012
+
 # ── HUSAAM: RSI + MACD (تآزر) + مدى شمعة vs وسيط + نافذة UTC — توازن بين جودة وعدد الإشارات ──
 _HUSAAM_STRICT_SCORE = 10
 _HUSAAM_STRICT_RSI_OS = 36
@@ -1952,12 +1960,76 @@ def _analyze_husaam_private_signal(candles) -> tuple:
     return "wait", 0
 
 
+def _analyze_live_signal(candles) -> tuple:
+    """
+    LIVE: اتجاه + Pullback/Breakout على شموع 1m مغلقة.
+    يهدف لعدد فرص أعلى من EMA10 مع الحفاظ على فلتر زخم أساسي.
+    """
+    kit = _candles_ohlc_kit(_ema10_closed_only(candles))
+    if len(kit) < _LIVE_MIN_BARS:
+        return "wait", 0
+    kit = kit[-_LIVE_MIN_BARS:]
+    closes = [float(c["close"]) for c in kit]
+    if len(closes) < _LIVE_MIN_BARS:
+        return "wait", 0
+    i = len(kit) - 1
+    j = i - 1
+    if j < 1:
+        return "wait", 0
+
+    fast_i = _husaam_ema10_ema_at(closes, i, _LIVE_FAST_EMA)
+    slow_i = _husaam_ema10_ema_at(closes, i, _LIVE_SLOW_EMA)
+    trend_i = _husaam_ema10_ema_at(closes, i, _LIVE_TREND_EMA)
+    fast_j = _husaam_ema10_ema_at(closes, j, _LIVE_FAST_EMA)
+    slow_j = _husaam_ema10_ema_at(closes, j, _LIVE_SLOW_EMA)
+    trend_j = _husaam_ema10_ema_at(closes, j, _LIVE_TREND_EMA)
+    if min(fast_i, slow_i, trend_i, fast_j, slow_j, trend_j) <= 0:
+        return "wait", 0
+
+    macd_line, signal_line, hist = calc_macd_series(closes)
+    if macd_line is None:
+        return "wait", 0
+    rsi = calc_rsi(closes)
+
+    o_i = float(kit[i]["open"])
+    h_i = float(kit[i]["high"])
+    l_i = float(kit[i]["low"])
+    c_i = float(kit[i]["close"])
+    h_j = float(kit[j]["high"])
+    l_j = float(kit[j]["low"])
+    c_j = float(kit[j]["close"])
+    rng_i = max(h_i - l_i, 1e-12)
+    body_i = abs(c_i - o_i) / rng_i
+    tol_up = max(fast_j * _LIVE_TOUCH_TOL_PCT, 1e-12)
+    tol_dn = max(fast_j * _LIVE_TOUCH_TOL_PCT, 1e-12)
+
+    up_trend = fast_i > slow_i > trend_i and slow_i >= slow_j and trend_i >= trend_j
+    dn_trend = fast_i < slow_i < trend_i and slow_i <= slow_j and trend_i <= trend_j
+
+    pullback_up = l_j <= fast_j + tol_up and c_j >= slow_j * 0.9985
+    pullback_dn = h_j >= fast_j - tol_dn and c_j <= slow_j * 1.0015
+    breakout_up = c_i > h_j and body_i >= 0.32
+    breakout_dn = c_i < l_j and body_i >= 0.32
+
+    up_mom = hist[i] > 0 and hist[i] >= hist[j] and macd_line[i] >= signal_line[i]
+    dn_mom = hist[i] < 0 and hist[i] <= hist[j] and macd_line[i] <= signal_line[i]
+
+    if up_trend and up_mom and 45 <= rsi <= 76 and c_i >= fast_i and (pullback_up or breakout_up):
+        return "call", _LIVE_SCORE
+    if dn_trend and dn_mom and 24 <= rsi <= 55 and c_i <= fast_i and (pullback_dn or breakout_dn):
+        return "put", _LIVE_SCORE
+    return "wait", 0
+
+
 def analyze(candles, strategy) -> str:
     if strategy == "HUSAAM_EMA10":
         d, _ = _analyze_husaam_ema10_signal(candles)
         return d
     if strategy == "HUSAAM_PRIVATE":
         d, _ = _analyze_husaam_private_signal(candles)
+        return d
+    if strategy == "LIVE":
+        d, _ = _analyze_live_signal(candles)
         return d
     if strategy == "HUSAAM":
         return _analyze_husaam_strict(candles)
@@ -2093,6 +2165,8 @@ def analyze_score(candles, strategy) -> tuple:
         return _analyze_husaam_ema10_signal(candles)
     if strategy == "HUSAAM_PRIVATE":
         return _analyze_husaam_private_signal(candles)
+    if strategy == "LIVE":
+        return _analyze_live_signal(candles)
     if strategy == "HUSAAM":
         d = _analyze_husaam_strict(candles)
         return (d, _HUSAAM_STRICT_SCORE) if d != "wait" else ("wait", 0)
@@ -3701,7 +3775,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                 _min_bars = (
                     _HUSAAM_PRIVATE_MIN_BARS
                     if req.strategy == "HUSAAM_PRIVATE"
-                    else _HUSAAM_EMA10_ANALYSIS_BARS
+                    else (_LIVE_MIN_BARS if req.strategy == "LIVE" else _HUSAAM_EMA10_ANALYSIS_BARS)
                 )
                 _need_len = _min_bars
                 _oanda_analysis_bars = int(os.getenv("OANDA_ANALYSIS_BARS", "200") or 200)
@@ -3715,7 +3789,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
                     _analysis_target = (
                         _HUSAAM_PRIVATE_MIN_BARS
                         if req.strategy == "HUSAAM_PRIVATE"
-                        else _HUSAAM_EMA10_ANALYSIS_BARS
+                        else (_LIVE_MIN_BARS if req.strategy == "LIVE" else _HUSAAM_EMA10_ANALYSIS_BARS)
                     )
                     _use_oanda_live = _oanda_live_feed_enabled() and _is_live_asset(a)
                     if _use_oanda_live:
