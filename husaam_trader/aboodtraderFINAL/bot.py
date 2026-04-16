@@ -3628,6 +3628,9 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
     # بعد تكرار WAIT عدة دورات، فعّل fallback أسرع (الافتراضي 6 ≈ قرابة دقيقة حسب زمن الدورة).
     fallback_wait_streak = int(os.getenv("BOT_FALLBACK_WAIT_STREAK", "6") or 6)
     fallback_wait_streak = max(2, min(fallback_wait_streak, 24))
+    # حد أقصى للانتظار بين الصفقات: إذا لا توجد إشارة تُؤخذ صفقة باتجاه السوق بعد هذا الزمن.
+    force_entry_interval_sec = float(os.getenv("BOT_FORCE_ENTRY_INTERVAL_SEC", "240") or 240)
+    force_entry_interval_sec = max(60.0, min(force_entry_interval_sec, 1800.0))
     # إعادة تشغيل ذاتية عند تكرار حالة 0/N شموع 1m من الشارت (جلسة WS متدهورة غالباً)
     auto_restart_zero_candles_streak = int(
         os.getenv("BOT_AUTO_RESTART_ZERO_CANDLES_STREAK", "6") or 6
@@ -3742,6 +3745,8 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
         start_bal = S["demo_balance"] if req.account_type=="demo" else S["real_balance"]
     S["start_balance"] = start_bal
     log.info(f"🏁 رصيد البداية المعتمد: {start_bal}")
+    if float(S.get("_last_trade_open_ts", 0) or 0) <= 0:
+        S["_last_trade_open_ts"] = time.time()
 
 
     while not _should_stop():
@@ -3756,6 +3761,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             chosen_asset = all_assets[0]
             burst_count = 1
             any_candles = False
+            candles_by_asset = {}
 
             if QX and S["logged_in"] and S["client"]:
                 if _central_market_enabled():
@@ -3946,12 +3952,47 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             if direction == "wait":
                 # any_candles=True: شموع كافية لكن الاستراتيجية أعطت WAIT — ليس «نقص شموع»
                 if any_candles:
+                    _last_trade_ts = float(S.get("_last_trade_open_ts", 0) or 0)
+                    if _last_trade_ts <= 0:
+                        _last_trade_ts = float(S.get("_last_entry_ts", 0) or 0)
+                    _since_last_trade = (
+                        time.time() - _last_trade_ts if _last_trade_ts > 0 else 0.0
+                    )
+                    if _since_last_trade >= force_entry_interval_sec:
+                        fb_best_score = 0
+                        fb_best_dir = "wait"
+                        fb_best_asset = None
+                        for a, cs in candles_by_asset.items():
+                            d2, s2 = _fallback_direction_from_candles(cs)
+                            if d2 != "wait" and s2 >= fb_best_score:
+                                fb_best_score = s2
+                                fb_best_dir = d2
+                                fb_best_asset = a
+                        if fb_best_asset and fb_best_dir != "wait":
+                            direction = fb_best_dir
+                            chosen_asset = fb_best_asset
+                            S["_wait_streak"] = 0
+                            S["status_msg"] = "⚡ دخول تلقائي باتجاه السوق بعد انتظار 4 دقائق"
+                            log.info(
+                                "⚡ Forced trend entry بعد %.0fs: %s → %s (score=%s)",
+                                _since_last_trade,
+                                chosen_asset,
+                                direction.upper(),
+                                fb_best_score,
+                            )
+                        else:
+                            log.info(
+                                "⏳ انتهت مهلة %.0fs بدون إشارة، لكن اتجاه السوق غير واضح بعد",
+                                force_entry_interval_sec,
+                            )
+                if direction == "wait" and any_candles:
                     wt = 4.0
                     stop.wait(timeout=wt)
-                else:
+                elif direction == "wait":
                     log.info("⏸️ انتظار (لا بيانات تحليل كافية)")
                     stop.wait(timeout=1.0)
-                continue
+                if direction == "wait":
+                    continue
             else:
                 skips = 0
 
@@ -4082,6 +4123,7 @@ def bot_worker(req: BotReq, S: dict, stop: threading.Event):
             # تم فتح صفقة فعلية — ثبّت بصمة آخر دخول لتجنّب التكرار السريع
             S["_last_entry_key"] = entry_key
             S["_last_entry_ts"] = time.time()
+            S["_last_trade_open_ts"] = time.time()
 
             # ── انتظار مدة الصفقة كاملة ───────────────────────────────────
             # مع صفقات مفتوحة: لا نخرج مبكراً بسبب stop — وإلا تُفتح صفقات على Quotex ولا تُسجَّل في wins/losses
