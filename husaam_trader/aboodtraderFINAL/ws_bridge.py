@@ -11,6 +11,7 @@
 import argparse
 import asyncio
 import base64
+import hashlib
 import logging
 import os
 import traceback
@@ -151,16 +152,78 @@ def _playwright_proxy_config(proxy_url: str) -> Optional[Dict[str, Any]]:
     return cfg
 
 
+def _hash12(v: str) -> str:
+    s = str(v or "")
+    if not s:
+        return "na"
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()[:12]
+
+
+def _proxy_session_hint(proxy_url: str) -> str:
+    """
+    يحاول استخراج معرف sticky session من user/pass للبروكسي (لأغراض التشخيص فقط).
+    أمثلة: session-XXXX / sessid=YYYY / sid_ZZZZ
+    """
+    raw = (proxy_url or "").strip().strip('"').strip("'")
+    if not raw:
+        return "none"
+    try:
+        u = urllib.parse.urlparse(raw)
+    except Exception:
+        return "parse_fail"
+    parts = []
+    try:
+        if u.username:
+            parts.append(urllib.parse.unquote(u.username))
+    except Exception:
+        pass
+    try:
+        if u.password:
+            parts.append(urllib.parse.unquote(u.password))
+    except Exception:
+        pass
+    blob = "|".join(parts).lower()
+    if not blob:
+        return "no_userpass"
+    for token in blob.replace("=", "-").split("_"):
+        if token.startswith("session-") or token.startswith("sess-") or token.startswith("sid-"):
+            val = token.split("-", 1)[-1].strip()
+            if val:
+                return val[:24]
+    if "session-" in blob:
+        return blob.split("session-", 1)[-1][:24]
+    if "sessid-" in blob:
+        return blob.split("sessid-", 1)[-1][:24]
+    return "unknown"
+
+
 async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
     session_id = uuid.uuid4().hex[:12]
     outbound: asyncio.Queue = asyncio.Queue()
     session_done = asyncio.Event()
     end_lock = asyncio.Lock()
+    bridge_started_ts = asyncio.get_running_loop().time()
+    diag = {
+        "ws_open_seen": False,
+        "ws_open_ts": None,
+        "last_close_code": None,
+        "last_close_reason": "",
+        "last_close_ts": None,
+        "last_reconnect_try": 0,
+        "last_reconnect_delay_ms": 0,
+        "ws_error_count": 0,
+    }
 
     print(f"[Bridge] session={session_id} begin | upstream target len={len(target_url or '')}", flush=True)
 
     resolved_proxy = _resolve_proxy_url(proxy_url)
     proxy_cfg = _playwright_proxy_config(resolved_proxy)
+    target_hash = _hash12(target_url)
+    proxy_session = _proxy_session_hint(resolved_proxy)
+    print(
+        f"[Bridge] session={session_id} corr target={target_hash} proxy_session={proxy_session}",
+        flush=True,
+    )
     if proxy_cfg:
         print(f"[Bridge] session={session_id} Playwright proxy: {proxy_cfg.get('server')}", flush=True)
     else:
@@ -302,7 +365,32 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                 if session_done.is_set():
                     return
                 session_done.set()
+                now_ts = asyncio.get_running_loop().time()
+                open_to_close_ms = -1
+                if diag.get("ws_open_ts") is not None and diag.get("last_close_ts") is not None:
+                    open_to_close_ms = int(
+                        max(0.0, float(diag["last_close_ts"]) - float(diag["ws_open_ts"])) * 1000
+                    )
+                if not diag.get("ws_open_seen"):
+                    phase = "no_open_event_or_upgrade_failed"
+                elif 0 <= open_to_close_ms < 2000:
+                    phase = "open_then_close_lt2s"
+                else:
+                    phase = "open_then_close_or_local_end"
                 print(f"[Bridge] session={session_id} end | {reason}", flush=True)
+                print(
+                    (
+                        f"[Bridge] session={session_id} summary phase={phase} "
+                        f"close_code={diag.get('last_close_code')} "
+                        f"close_reason={diag.get('last_close_reason') or '-'} "
+                        f"open_to_close_ms={open_to_close_ms} "
+                        f"ws_errors={diag.get('ws_error_count')} "
+                        f"last_retry={diag.get('last_reconnect_try')}@{diag.get('last_reconnect_delay_ms')}ms "
+                        f"life_ms={int(max(0.0, now_ts - bridge_started_ts)*1000)} "
+                        f"target={target_hash} proxy_session={proxy_session}"
+                    ),
+                    flush=True,
+                )
                 try:
                     await page.evaluate(
                         "() => { if (window.__bridgeStopUpstream) window.__bridgeStopUpstream(); }"
@@ -508,15 +596,38 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                 kind, data = item
                 if kind == "str":
                     if isinstance(data, str) and data.startswith("__WS_DIAG__"):
+                        if data.startswith("__WS_DIAG__close|"):
+                            try:
+                                _, rest = data.split("__WS_DIAG__close|", 1)
+                                ccode, creason = (rest.split("|", 1) + [""])[:2]
+                                diag["last_close_code"] = str(ccode or "").strip() or "?"
+                                diag["last_close_reason"] = str(creason or "").strip()
+                                diag["last_close_ts"] = asyncio.get_running_loop().time()
+                            except Exception:
+                                pass
+                        elif data.startswith("__WS_DIAG__reconnect_try|"):
+                            try:
+                                _, rest = data.split("__WS_DIAG__reconnect_try|", 1)
+                                rtry, rdelay = (rest.split("|", 1) + ["0"])[:2]
+                                diag["last_reconnect_try"] = int(float(rtry or 0))
+                                diag["last_reconnect_delay_ms"] = int(float(rdelay or 0))
+                            except Exception:
+                                pass
                         print(f"[Bridge] session={session_id} {data}", flush=True)
                         continue
                     if data == "__WS_OPEN__":
+                        diag["ws_open_seen"] = True
+                        diag["ws_open_ts"] = asyncio.get_running_loop().time()
                         print(f"[Bridge] session={session_id} upstream Quotex WebSocket OPEN", flush=True)
                         continue
                     if data == "__WS_CLOSE__":
                         print(f"[Bridge] session={session_id} upstream Quotex WebSocket CLOSE", flush=True)
                         continue
                     if data == "__WS_ERROR__":
+                        try:
+                            diag["ws_error_count"] = int(diag.get("ws_error_count", 0) or 0) + 1
+                        except Exception:
+                            diag["ws_error_count"] = 1
                         print(f"[Bridge] session={session_id} upstream Quotex WebSocket ERROR", flush=True)
                         continue
                     if data == "__WS_BRIDGE_ERR__":

@@ -730,70 +730,103 @@ def _install_pyquotex_ws_proxy_patch(proxies):
         if not self.state.SSID:
             await self.authenticate()
         self.websocket_client = _qx_api_mod.WebsocketClient(self)
-        use_bridge = os.getenv("QUOTEX_USE_PLAYWRIGHT_BRIDGE", "").strip().lower() in ("1", "true", "yes", "on")
-        bridge_ws_url = None
-        bridge_port = None
-        if use_bridge:
-            try:
-                target_ws_url = getattr(self.websocket, "url", "") or ""
-                bridge_ws_url = _ensure_playwright_bridge(target_ws_url, self)
-                if bridge_ws_url:
-                    self.websocket.url = bridge_ws_url
-                    bridge_port = getattr(self, "_nexora_pw_bridge_port", None)
-                    log.info("🔁 WebSocket redirected via Playwright bridge: %s", bridge_ws_url)
-            except Exception as e:
-                log.warning("Playwright bridge redirect failed: %s", e)
-        if ws_insecure_ssl:
-            log.warning(
-                "WebSocket عبر بروكسي MITM: تعطيل التحقق من شهادة TLS (ZenRows أو QUOTEX_WS_INSECURE_SSL=1)"
+
+        def _build_sslopt():
+            if ws_insecure_ssl:
+                log.warning(
+                    "WebSocket عبر بروكسي MITM: تعطيل التحقق من شهادة TLS (ZenRows أو QUOTEX_WS_INSECURE_SSL=1)"
+                )
+                _ssl = {
+                    "check_hostname": False,
+                    "cert_reqs": _qx_api_mod.ssl.CERT_NONE,
+                }
+            else:
+                _ssl = {
+                    "check_hostname": True,
+                    "cert_reqs": _qx_api_mod.ssl.CERT_REQUIRED,
+                    "ca_certs": _qx_api_mod.cacert,
+                    "context": _qx_api_mod.ssl_context,
+                }
+            if _qx_api_mod.platform.system() == "Linux":
+                _ssl["ssl_version"] = _qx_api_mod.ssl.PROTOCOL_TLS
+            return _ssl
+
+        async def _run_ws_once(*, via_bridge: bool) -> tuple:
+            self.state.check_websocket_if_connect = None
+            self.state.check_websocket_if_error = False
+            self.state.websocket_error_reason = None
+            bridge_ws_url = None
+            bridge_port = None
+            target_ws_url = getattr(self.websocket, "url", "") or ""
+            if via_bridge:
+                try:
+                    bridge_ws_url = _ensure_playwright_bridge(target_ws_url, self)
+                    if bridge_ws_url:
+                        self.websocket.url = bridge_ws_url
+                        bridge_port = getattr(self, "_nexora_pw_bridge_port", None)
+                        log.info("🔁 WebSocket redirected via Playwright bridge: %s", bridge_ws_url)
+                except Exception as e:
+                    log.warning("Playwright bridge redirect failed: %s", e)
+                    bridge_ws_url = None
+            else:
+                # تأكد من العودة للرابط الأصلي وليس ws://127.0.0.1 الخاص بالـbridge السابق.
+                try:
+                    _u = str(getattr(self.websocket, "url", "") or "")
+                    if _u.startswith("ws://127.0.0.1:"):
+                        self.websocket.url = target_ws_url
+                except Exception:
+                    pass
+
+            sslopt = _build_sslopt()
+            payload = {
+                "suppress_origin": True,
+                "ping_interval": 24,
+                "ping_timeout": 20,
+                "ping_payload": "2",
+                "origin": self.https_url if not bridge_ws_url else "http://127.0.0.1",
+                "host": (
+                    f"ws2.{self.host}"
+                    if not bridge_ws_url
+                    else f"127.0.0.1:{int(bridge_port or getattr(self, '_nexora_pw_bridge_port', 0) or 0)}"
+                ),
+                "sslopt": sslopt,
+            }
+            # عند استخدام bridge المحلي لا نمرّر proxy للـWS.
+            if not bridge_ws_url:
+                payload.update(ws_proxy)
+
+            self.websocket_thread = _qx_api_mod.threading.Thread(
+                target=self.websocket.run_forever, kwargs=payload
             )
-            sslopt = {
-                "check_hostname": False,
-                "cert_reqs": _qx_api_mod.ssl.CERT_NONE,
-            }
-        else:
-            sslopt = {
-                "check_hostname": True,
-                "cert_reqs": _qx_api_mod.ssl.CERT_REQUIRED,
-                "ca_certs": _qx_api_mod.cacert,
-                "context": _qx_api_mod.ssl_context,
-            }
-        if _qx_api_mod.platform.system() == "Linux":
-            sslopt["ssl_version"] = _qx_api_mod.ssl.PROTOCOL_TLS
-        payload = {
-            "suppress_origin": True,
-            "ping_interval": 24,
-            "ping_timeout": 20,
-            "ping_payload": "2",
-            "origin": self.https_url if not bridge_ws_url else "http://127.0.0.1",
-            "host": (
-                f"ws2.{self.host}"
-                if not bridge_ws_url
-                else f"127.0.0.1:{int(bridge_port or getattr(self, '_nexora_pw_bridge_port', 0) or 0)}"
-            ),
-            "sslopt": sslopt,
-        }
+            self.websocket_thread.daemon = True
+            self.websocket_thread.start()
 
-        # عند استخدام bridge المحلي لا نمرّر proxy للـWS.
-        if not bridge_ws_url:
-            payload.update(ws_proxy)
+            while True:
+                if self.state.check_websocket_if_error:
+                    return False, self.state.websocket_error_reason
+                if self.state.check_websocket_if_connect == 0:
+                    return False, "Websocket connection closed."
+                if self.state.check_websocket_if_connect == 1:
+                    return True, "Websocket connected successfully!!!"
+                if self.state.check_rejected_connection == 1:
+                    self.state.SSID = None
+                    return True, "Websocket Token Rejected."
+                await asyncio.sleep(0.1)
 
-        self.websocket_thread = _qx_api_mod.threading.Thread(
-            target=self.websocket.run_forever, kwargs=payload
-        )
-        self.websocket_thread.daemon = True
-        self.websocket_thread.start()
-        while True:
-            if self.state.check_websocket_if_error:
-                return False, self.state.websocket_error_reason
-            if self.state.check_websocket_if_connect == 0:
-                return False, "Websocket connection closed."
-            if self.state.check_websocket_if_connect == 1:
-                return True, "Websocket connected successfully!!!"
-            if self.state.check_rejected_connection == 1:
-                self.state.SSID = None
-                return True, "Websocket Token Rejected."
-            await asyncio.sleep(0.1)
+        use_bridge = os.getenv("QUOTEX_USE_PLAYWRIGHT_BRIDGE", "").strip().lower() in ("1", "true", "yes", "on")
+        if use_bridge:
+            ok, msg = await _run_ws_once(via_bridge=True)
+            if ok:
+                return ok, msg
+            # fallback سريع: إذا فشل bridge نجرب WS مباشر بنفس الجلسة قبل الفشل النهائي.
+            log.warning("Playwright bridge WS failed (%s) — retry direct WS", msg or "unknown")
+            try:
+                _stop_playwright_bridge_for_api(self)
+            except Exception:
+                pass
+            return await _run_ws_once(via_bridge=False)
+
+        return await _run_ws_once(via_bridge=False)
 
     _start_websocket_with_proxy._nexora_ws_proxy_patch = True
     QuotexAPI.start_websocket = _start_websocket_with_proxy
