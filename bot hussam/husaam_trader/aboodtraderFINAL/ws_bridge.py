@@ -76,7 +76,7 @@ def _playwright_proxy_config(proxy_url: str) -> Optional[Dict[str, Any]]:
     return cfg
 
 
-async def bridge_handler(client_ws, target_url: str, proxy_url: str = "", storage_state_path: str = ""):
+async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
     outbound = asyncio.Queue()
     resolved_proxy = _resolve_proxy_url(proxy_url)
     proxy_cfg = _playwright_proxy_config(resolved_proxy)
@@ -99,10 +99,6 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = "", storag
         }
         if proxy_cfg:
             ctx_kw["proxy"] = proxy_cfg
-        _ssp = (storage_state_path or "").strip()
-        if _ssp and os.path.isfile(_ssp):
-            ctx_kw["storage_state"] = _ssp
-            print(f"[Bridge] storage_state loaded: {_ssp}", flush=True)
         context = await browser.new_context(**ctx_kw)
         page = await context.new_page()
         # عبر بروكسي سكني قد يتأخر domcontentloaded دقائق؛ «commit» أسرع. بدون صفحة يصلح Origin أحياناً.
@@ -299,21 +295,11 @@ async def main():
         default="",
         help="نفس بروكسي pyquotex (http/https/socks5) لتطابق IP جلسة الـ WebSocket",
     )
-    parser.add_argument(
-        "--storage-state-path",
-        default="",
-        help="Playwright storage_state JSON saved after manual Cloudflare verification",
-    )
     args = parser.parse_args()
 
     async def handler(ws, *rest):
         try:
-            await bridge_handler(
-                ws,
-                args.target_url,
-                proxy_url=args.proxy_url,
-                storage_state_path=args.storage_state_path,
-            )
+            await bridge_handler(ws, args.target_url, proxy_url=args.proxy_url)
         except Exception as e:
             print(f"[Bridge] handler crash: {e}")
             raise

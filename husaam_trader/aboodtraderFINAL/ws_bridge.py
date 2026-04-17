@@ -205,7 +205,7 @@ def _proxy_session_hint(proxy_url: str) -> str:
     return "absent"
 
 
-async def bridge_handler(client_ws, target_url: str, proxy_url: str = "", storage_state_path: str = ""):
+async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
     session_id = uuid.uuid4().hex[:12]
     outbound: asyncio.Queue = asyncio.Queue()
     session_done = asyncio.Event()
@@ -297,10 +297,6 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = "", storag
         }
         if proxy_cfg:
             ctx_kw["proxy"] = proxy_cfg
-        _ssp = (storage_state_path or "").strip()
-        if _ssp and os.path.isfile(_ssp):
-            ctx_kw["storage_state"] = _ssp
-            print(f"[Bridge] session={session_id} storage_state loaded: {_ssp}", flush=True)
         context = await browser.new_context(**ctx_kw)
         page = await context.new_page()
         nav_url = (os.environ.get("QUOTEX_BRIDGE_NAV_URL") or "https://qxbroker.com").strip()
@@ -718,23 +714,13 @@ async def main():
         default="",
         help="نفس بروكسي pyquotex (http/https/socks5) لتطابق IP جلسة الـ WebSocket",
     )
-    parser.add_argument(
-        "--storage-state-path",
-        default="",
-        help="Playwright storage_state JSON saved after manual Cloudflare verification",
-    )
     args = parser.parse_args()
 
     async def handler(ws, *rest):
         peer = getattr(ws, "remote_address", None)
         print(f"[Bridge] local TCP/WebSocket peer={peer}", flush=True)
         try:
-            await bridge_handler(
-                ws,
-                args.target_url,
-                proxy_url=args.proxy_url,
-                storage_state_path=args.storage_state_path,
-            )
+            await bridge_handler(ws, args.target_url, proxy_url=args.proxy_url)
         except Exception as e:
             print(f"[Bridge] handler crash: {e}")
             print(traceback.format_exc())
