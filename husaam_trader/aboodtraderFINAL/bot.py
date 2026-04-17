@@ -602,7 +602,112 @@ def _wait_local_port_listening(port: int, timeout_sec: float = 8.0) -> bool:
     return False
 
 
-def _ensure_playwright_bridge(target_ws_url: str, api_owner):
+_manual_verify_proc_by_email: dict = {}
+_manual_verify_proc_guard = threading.Lock()
+
+
+def _manual_verify_enabled() -> bool:
+    return os.getenv("QUOTEX_MANUAL_VERIFY_MODE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _manual_verify_paths(email: str) -> tuple:
+    base = os.path.dirname(os.path.abspath(__file__))
+    out_dir = os.path.join(base, "data", "manual_verify")
+    os.makedirs(out_dir, exist_ok=True)
+    key = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(email or "").strip().lower() or "_")
+    state_path = os.getenv("QUOTEX_MANUAL_VERIFY_STATE_PATH", "").strip() or os.path.join(
+        out_dir, f"{key}.storage_state.json"
+    )
+    done_path = os.getenv("QUOTEX_MANUAL_VERIFY_DONE_PATH", "").strip() or os.path.join(
+        out_dir, f"{key}.done"
+    )
+    return state_path, done_path
+
+
+def _manual_verify_is_ready(email: str) -> bool:
+    state_path, done_path = _manual_verify_paths(email)
+    return os.path.isfile(done_path) and os.path.isfile(state_path) and os.path.getsize(state_path) > 20
+
+
+def _manual_verify_state_path_if_ready(email: str) -> str:
+    state_path, _ = _manual_verify_paths(email)
+    if _manual_verify_is_ready(email):
+        return state_path
+    return ""
+
+
+def _manual_verify_running(email: str) -> bool:
+    ek = str(email or "").strip().lower()
+    with _manual_verify_proc_guard:
+        p = _manual_verify_proc_by_email.get(ek)
+    if p is None:
+        return False
+    try:
+        return p.poll() is None
+    except Exception:
+        return False
+
+
+def _launch_manual_verify_browser(email: str) -> tuple:
+    """
+    يفتح متصفح مرّة أولى يدويًا لحل Cloudflare ثم يحفظ storage_state تلقائيًا.
+    """
+    ek = str(email or "").strip().lower()
+    if not ek:
+        return False, "missing email"
+    if _manual_verify_is_ready(ek):
+        return True, "already_ready"
+    if _manual_verify_running(ek):
+        return True, "already_running"
+
+    state_path, done_path = _manual_verify_paths(ek)
+    try:
+        base = os.path.dirname(os.path.abspath(__file__))
+        script = os.path.join(base, "manual_cf_verify.py")
+        if not os.path.isfile(script):
+            return False, f"helper script missing: {script}"
+        py_exe = (os.getenv("PYTHON_BIN") or "").strip() or sys.executable
+        url = (os.getenv("QUOTEX_MANUAL_VERIFY_URL") or "https://qxbroker.com/en/sign-in").strip()
+        timeout_sec = int(float(os.getenv("QUOTEX_MANUAL_VERIFY_TIMEOUT_SEC", "900") or 900))
+        timeout_sec = max(120, min(timeout_sec, 7200))
+        cmd = [
+            py_exe,
+            script,
+            "--url",
+            url,
+            "--state-path",
+            state_path,
+            "--done-path",
+            done_path,
+            "--timeout-sec",
+            str(timeout_sec),
+        ]
+        try:
+            _bp = globals().get("QX_HTTP_PROXIES")
+            _bridge_px = ""
+            if isinstance(_bp, dict):
+                _bridge_px = str(_bp.get("https") or _bp.get("http") or "").strip()
+            if _bridge_px:
+                cmd.extend(["--proxy-url", _bridge_px])
+        except Exception:
+            pass
+        logs_dir = os.path.join(base, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        lf = open(os.path.join(logs_dir, "manual_cf_verify.log"), "a", encoding="utf-8")
+        proc = subprocess.Popen(cmd, cwd=base, stdout=lf, stderr=lf)
+        with _manual_verify_proc_guard:
+            _manual_verify_proc_by_email[ek] = proc
+        return True, "started"
+    except Exception as e:
+        return False, str(e)
+
+
+def _ensure_playwright_bridge(target_ws_url: str, api_owner, email_hint: str = ""):
     """
     جسر محلي لكل جلسة pyquotex (api_owner). لا تُوقف جسور الحسابات الأخرى.
     """
@@ -636,6 +741,10 @@ def _ensure_playwright_bridge(target_ws_url: str, api_owner):
         "--target-url",
         target_ws_url,
     ]
+    _state_path = _manual_verify_state_path_if_ready(email_hint) if _manual_verify_enabled() else ""
+    if _state_path:
+        cmd.extend(["--storage-state-path", _state_path])
+        log.info("Playwright bridge: استخدام storage_state من التحقق اليدوي (%s)", _state_path)
     try:
         _bp = globals().get("QX_HTTP_PROXIES")
         _bridge_px = ""
@@ -760,7 +869,8 @@ def _install_pyquotex_ws_proxy_patch(proxies):
             target_ws_url = getattr(self.websocket, "url", "") or ""
             if via_bridge:
                 try:
-                    bridge_ws_url = _ensure_playwright_bridge(target_ws_url, self)
+                    _em = str(getattr(self, "email", "") or "")
+                    bridge_ws_url = _ensure_playwright_bridge(target_ws_url, self, _em)
                     if bridge_ws_url:
                         self.websocket.url = bridge_ws_url
                         bridge_port = getattr(self, "_nexora_pw_bridge_port", None)
@@ -4869,6 +4979,28 @@ async def login(req: LoginReq):
     if not S:
         SESSIONS[req.token] = new_session(email_key)
         S = SESSIONS[req.token]
+    if QX and _manual_verify_enabled() and not _manual_verify_is_ready(email_key):
+        # وضع تحقق يدوي أول مرة: أوقف أي بوت شغال ثم افتح متصفح التحقق.
+        if S.get("running"):
+            try:
+                S["stop_event"].set()
+            except Exception:
+                pass
+            S["running"] = False
+        ok_mv, st_mv = _launch_manual_verify_browser(email_key)
+        msg_mv = (
+            "🔐 مطلوب تحقق Cloudflare يدوي (مرة أولى): تم فتح المتصفح. "
+            "بعد إكمال التحقق والعودة التلقائية، أعد تسجيل الدخول."
+            if ok_mv
+            else f"تعذر تشغيل التحقق اليدوي: {st_mv}"
+        )
+        S["status_msg"] = msg_mv
+        return {
+            "success": False,
+            "needs_manual_verify": True,
+            "manual_verify_started": bool(ok_mv),
+            "message": msg_mv,
+        }
     if QX:
         if S.get("logged_in"):
             _ux_finalize_open_for_email(
