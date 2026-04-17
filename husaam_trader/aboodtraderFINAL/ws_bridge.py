@@ -189,6 +189,29 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
             flush=True,
         )
 
+    # إعادة الاتصال بالـ upstream يجب أن تكون تدريجية ومحدودة لتفادي spam 1006 والحظر السريع.
+    try:
+        reconnect_base_ms = int(
+            os.getenv("QUOTEX_BRIDGE_RECONNECT_BASE_MS", "1200") or 1200
+        )
+    except Exception:
+        reconnect_base_ms = 1200
+    try:
+        reconnect_max_ms = int(
+            os.getenv("QUOTEX_BRIDGE_RECONNECT_MAX_MS", "9000") or 9000
+        )
+    except Exception:
+        reconnect_max_ms = 9000
+    try:
+        reconnect_max_tries = int(
+            os.getenv("QUOTEX_BRIDGE_RECONNECT_MAX_TRIES", "8") or 8
+        )
+    except Exception:
+        reconnect_max_tries = 8
+    reconnect_base_ms = max(300, min(reconnect_base_ms, 15000))
+    reconnect_max_ms = max(reconnect_base_ms, min(reconnect_max_ms, 60000))
+    reconnect_max_tries = max(1, min(reconnect_max_tries, 40))
+
     async with _playwright_entry() as p:
         browser = await p.chromium.launch(
             headless=True,
@@ -293,11 +316,15 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
 
         await page.evaluate(
             """
-            () => {
+            (cfg) => {
               window.__targetWs = null;
               window.__targetPending = [];
               window.__bridgeSessionActive = true;
               window.__reconnectTimer = null;
+              window.__reconnectAttempt = 0;
+              window.__reconnectBaseMs = Math.max(300, Number(cfg?.base_ms || 1200));
+              window.__reconnectMaxMs = Math.max(window.__reconnectBaseMs, Number(cfg?.max_ms || 9000));
+              window.__reconnectMaxTries = Math.max(1, Number(cfg?.max_tries || 8));
 
               window.__bridgeStopUpstream = () => {
                 window.__bridgeSessionActive = false;
@@ -361,10 +388,21 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
               const scheduleReconnect = (targetUrl) => {
                 if (!window.__bridgeSessionActive) return;
                 if (window.__reconnectTimer != null) clearTimeout(window.__reconnectTimer);
+                window.__reconnectAttempt = Number(window.__reconnectAttempt || 0) + 1;
+                if (window.__reconnectAttempt > window.__reconnectMaxTries) {
+                  window.__bridgeEmit({ k: "t", d: "__WS_FATAL__|reconnect_exhausted|" + window.__reconnectAttempt });
+                  return;
+                }
+                const pow = Math.max(0, window.__reconnectAttempt - 1);
+                const delay = Math.min(
+                  window.__reconnectMaxMs,
+                  Math.round(window.__reconnectBaseMs * Math.pow(2, pow))
+                );
+                window.__bridgeEmit({ k: "t", d: "__WS_DIAG__reconnect_try|" + window.__reconnectAttempt + "|" + delay });
                 window.__reconnectTimer = setTimeout(() => {
                   window.__reconnectTimer = null;
                   if (window.__bridgeSessionActive) connectTarget(targetUrl);
-                }, 1200);
+                }, delay);
               };
 
               const connectTarget = (targetUrl) => {
@@ -377,6 +415,7 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                     try { ws.close(1000, "session inactive"); } catch (e) {}
                     return;
                   }
+                  window.__reconnectAttempt = 0;
                   window.__bridgeEmit({ k: "t", d: "__WS_OPEN__" });
                   flushPending();
                 };
@@ -419,7 +458,12 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
 
               window.__connectTarget = connectTarget;
             }
-            """
+            """,
+            {
+                "base_ms": reconnect_base_ms,
+                "max_ms": reconnect_max_ms,
+                "max_tries": reconnect_max_tries,
+            },
         )
 
         await page.evaluate("(targetUrl) => window.__connectTarget(targetUrl)", target_url)
@@ -477,6 +521,15 @@ async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
                         continue
                     if data == "__WS_BRIDGE_ERR__":
                         continue
+                    if isinstance(data, str) and data.startswith("__WS_FATAL__"):
+                        print(f"[Bridge] session={session_id} {data}", flush=True)
+                        try:
+                            if _ws_still_open(client_ws):
+                                await client_ws.close(code=1011, reason="bridge upstream fatal")
+                        except Exception:
+                            pass
+                        await end_session("upstream fatal")
+                        break
                     if not _ws_still_open(client_ws):
                         await end_session("local closed (str payload)")
                         break
