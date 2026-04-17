@@ -161,8 +161,8 @@ def _hash12(v: str) -> str:
 
 def _proxy_session_hint(proxy_url: str) -> str:
     """
-    يحاول استخراج معرف sticky session من user/pass للبروكسي (لأغراض التشخيص فقط).
-    أمثلة: session-XXXX / sessid=YYYY / sid_ZZZZ
+    يحاول التحقق من وجود sticky session في username فقط (بدون تسريب أسرار).
+    يعيد hash قصير للمعرف إن وُجد، ولا يطبع أي جزء خام من user/pass.
     """
     raw = (proxy_url or "").strip().strip('"').strip("'")
     if not raw:
@@ -171,30 +171,38 @@ def _proxy_session_hint(proxy_url: str) -> str:
         u = urllib.parse.urlparse(raw)
     except Exception:
         return "parse_fail"
-    parts = []
     try:
-        if u.username:
-            parts.append(urllib.parse.unquote(u.username))
+        uname = urllib.parse.unquote(u.username or "").strip().lower()
     except Exception:
-        pass
-    try:
-        if u.password:
-            parts.append(urllib.parse.unquote(u.password))
-    except Exception:
-        pass
-    blob = "|".join(parts).lower()
-    if not blob:
+        uname = ""
+    if not uname:
         return "no_userpass"
-    for token in blob.replace("=", "-").split("_"):
-        if token.startswith("session-") or token.startswith("sess-") or token.startswith("sid-"):
-            val = token.split("-", 1)[-1].strip()
-            if val:
-                return val[:24]
-    if "session-" in blob:
-        return blob.split("session-", 1)[-1][:24]
-    if "sessid-" in blob:
-        return blob.split("sessid-", 1)[-1][:24]
-    return "unknown"
+
+    normalized = (
+        uname.replace("=", "-")
+        .replace(":", "-")
+        .replace(".", "-")
+        .replace("/", "-")
+    )
+    for marker in ("session-", "sessid-", "sess-", "sid-"):
+        idx = normalized.find(marker)
+        if idx < 0:
+            continue
+        tail = normalized[idx + len(marker) :]
+        if not tail:
+            continue
+        sid = []
+        for ch in tail:
+            if ch.isalnum() or ch in ("-", "_"):
+                sid.append(ch)
+            else:
+                break
+        sid_val = "".join(sid).strip("-_")
+        if sid_val:
+            return f"hash:{_hash12(sid_val)}"
+    if "session" in normalized or "sess" in normalized or "sid" in normalized:
+        return "present_unparsed"
+    return "absent"
 
 
 async def bridge_handler(client_ws, target_url: str, proxy_url: str = ""):
