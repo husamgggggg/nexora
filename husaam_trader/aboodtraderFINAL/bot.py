@@ -8,7 +8,7 @@ NEXORA TRADE Bot — النسخة النهائية الكاملة
 ✅ متعدد المشتركين كل بحسابه المستقل
 ✅ إشعار عند تحقق الهدف
 """
-import asyncio, base64, html, json, logging, os, queue, random, re, socket, ssl, subprocess, sys
+import asyncio, base64, html, json, logging, os, platform, queue, random, re, socket, ssl, subprocess, sys
 import secrets, threading, time, traceback, weakref
 from contextlib import asynccontextmanager
 import urllib.parse
@@ -5167,6 +5167,34 @@ async def status(token: str=""):
         "real_min_balance_usd":    REAL_MIN_BALANCE_USD,
     }
 
+
+def _uvicorn_listen_host_port() -> tuple[str, int]:
+    """قراءة HOST/PORT من البيئة مع إزالة \\r/\\n والقيم الفارغة (تسبب فشل getaddrinfo على ويندوز)."""
+    raw_h = os.getenv("HOST")
+    if raw_h is None:
+        h = "0.0.0.0"
+    else:
+        h = raw_h.replace("\r", "").replace("\n", "").strip()
+        if not h:
+            h = "0.0.0.0"
+    raw_p = os.getenv("PORT", "8000")
+    ps = str(raw_p).replace("\r", "").replace("\n", "").strip()
+    try:
+        p = int(ps)
+    except (TypeError, ValueError):
+        p = 8000
+    return h, p
+
+
+def _win32_prebound_listen_socket(host: str, port: int) -> socket.socket:
+    """ربط IPv4 مباشر ثم تمرير السوكت لـ uvicorn — يتفادى asyncio create_server → getaddrinfo على بعض إعدادات ويندوز."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, int(port)))
+    sock.set_inheritable(True)
+    return sock
+
+
 if __name__ == "__main__":
     log.info("ℹ️ للجلسات وPIN: شغّل عملية واحدة فقط (worker واحد) حتى لا تُفقد SESSIONS بين الطلبات")
     log.info("🚀 NEXORA TRADE — http://localhost:8000")
@@ -5176,15 +5204,40 @@ if __name__ == "__main__":
     log.info(f"📦 pydantic : v{pydantic.VERSION}")
     if os.getenv("TELEGRAM_BOT_TOKEN", "").strip() and os.getenv("TELEGRAM_CHANNEL_ID", "").strip():
         log.info("📱 تيليجرام: إشعارات طلبات الانضمام → القناة مفعّلة")
-    _uv_kw = dict(
-        host=os.getenv("HOST", "0.0.0.0"),
-        port=int(os.getenv("PORT", "8000")),
-        access_log=False,
-    )
+    _h, _p = _uvicorn_listen_host_port()
+    _uv_kw = dict(host=_h, port=_p, access_log=False)
     _cert = (os.getenv("UVICORN_SSL_CERTFILE") or "").strip()
     _key = (os.getenv("UVICORN_SSL_KEYFILE") or "").strip()
     if _cert and _key:
         _uv_kw["ssl_certfile"] = _cert
         _uv_kw["ssl_keyfile"] = _key
         log.info("🔒 HTTPS: uvicorn SSL | cert=%s key=%s", _cert, _key)
-    uvicorn.run(app, **_uv_kw)
+    log.info("🔌 Uvicorn bind target %s:%s (platform=%s)", _h, _p, platform.system())
+    _use_prebound = sys.platform == "win32" and os.getenv("UVICORN_NO_PREBIND", "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+    )
+    _sock_pb: socket.socket | None = None
+    if _use_prebound:
+        try:
+            _sock_pb = _win32_prebound_listen_socket(_h, _p)
+        except OSError as e:
+            log.warning(
+                "⚠️ تعذر pre-bind على ويندوز لـ %s:%s (%s) — سيتم استخدام مسار uvicorn الاعتيادي",
+                _h,
+                _p,
+                e,
+            )
+    if _sock_pb is not None:
+        from uvicorn.config import Config
+        from uvicorn.server import Server
+
+        log.info(
+            "✅ الخادم يستمع — جرّب http://%s:%s (ورابط Cloudflare إن وُجد)",
+            _h,
+            _p,
+        )
+        Server(config=Config(app, **_uv_kw)).run(sockets=[_sock_pb])
+    else:
+        uvicorn.run(app, **_uv_kw)

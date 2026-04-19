@@ -469,7 +469,7 @@ async function loadSessions(manual){
   if(!AT) return;
   let r;
   try{
-    r = await fetch('/api/admin/sessions?admin_token='+encodeURIComponent(AT)+'&limit=500');
+    r = await fetch(nexoraApiUrl('/admin/sessions?admin_token='+encodeURIComponent(AT)+'&limit=500'));
   }catch(_){ return; }
   if(r.status === 403){
     toast('انتهت صلاحية الجلسة — سجّل الدخول من جديد', 'er');
@@ -528,9 +528,28 @@ function _startAdminPoll(){
   }, 5000);
 }
 
+function _nexoraApiOrigin(){
+  try{
+    const w=typeof window!=='undefined'?window:null;
+    if(w&&typeof w.NEXORA_API_BASE==='string'&&w.NEXORA_API_BASE.trim())
+      return w.NEXORA_API_BASE.trim().replace(/\/$/,'');
+    const m=document.querySelector('meta[name="nexora-api-base"]');
+    if(m){const c=(m.getAttribute('content')||'').trim();if(c)return c.replace(/\/$/,'');}
+    const h=String(location.hostname||'').toLowerCase();
+    if(h==='nexora-investment.com')
+      return `${location.protocol}//www.nexora-investment.com`.replace(/\/$/,'');
+    return '';
+  }catch(_){return '';}
+}
+function nexoraApiUrl(route){
+  const o=_nexoraApiOrigin();
+  const p='/api'+(route.startsWith('/')?route:'/'+route);
+  if(o)return o.replace(/\/$/,'')+p;
+  return p;
+}
 async function api(path, method='GET', body=null){
   try{
-    const r = await fetch('/api'+path, {
+    const r = await fetch(nexoraApiUrl(path), {
       method, headers:{'Content-Type':'application/json'},
       body: body?JSON.stringify(body):null
     });
@@ -542,7 +561,7 @@ async function loadAdminSettings(){
   if(!AT) return;
   let r;
   try{
-    r = await fetch('/api/admin/settings?admin_token='+encodeURIComponent(AT));
+    r = await fetch(nexoraApiUrl('/admin/settings?admin_token='+encodeURIComponent(AT)));
   }catch(_){ return; }
   if(r.status === 403){
     toast('انتهت صلاحية الجلسة — سجّل الدخول من جديد', 'er');
@@ -646,7 +665,7 @@ async function loadUsers(manual){
   if(!AT) return;
   let r;
   try{
-    r = await fetch('/api/admin/users?admin_token='+encodeURIComponent(AT));
+    r = await fetch(nexoraApiUrl('/admin/users?admin_token='+encodeURIComponent(AT)));
   } catch { return; }
   if(r.status === 403){
     if(_adminPollId != null){ clearInterval(_adminPollId); _adminPollId = null; }
@@ -784,7 +803,7 @@ async function confirmAction(){
 }
 
 async function deleteUser(email){
-  const r = await fetch('/api/admin/delete_user', {
+  const r = await fetch(nexoraApiUrl('/admin/delete_user'), {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({admin_token: AT, email, action:'delete'})

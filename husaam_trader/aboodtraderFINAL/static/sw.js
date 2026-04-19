@@ -1,3 +1,4 @@
+/* نسخة متوافقة مع sw.js الجذر — لا تُرجع undefined لـ respondWith */
 const CACHE = 'nexora-pwa-v11';
 const ASSETS = ['/', '/manifest.json', '/pwa/icon-192.png', '/pwa/icon-512.png',
   '/pwa/screenshot-narrow.png', '/pwa/screenshot-wide.png'];
@@ -20,13 +21,10 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   const u = String(req.url || '');
-
-  // API: دائماً الشبكة فقط — respondWith يجب أن يمرّر Response صالحة
   if (u.includes('/api/')) {
     e.respondWith(fetch(req));
     return;
   }
-
   e.respondWith(
     fetch(req).catch(() =>
       caches.match(req).then((hit) => {

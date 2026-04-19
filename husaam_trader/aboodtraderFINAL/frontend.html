@@ -1121,8 +1121,29 @@ function renderAssetLabelChip(asset){
   const icons=pairIconsHtml(asset,'oi-flag vaf-f','vaf-gen');
   return `<span class="vaf-chip">${icons}<span class="vaf-txt">${escHtml(pairLabel(asset))}</span></span>`;
 }
+let _lastApiAttemptUrl='';
+function _nexoraApiOrigin(){
+  try{
+    const w=typeof window!=='undefined'?window:null;
+    if(w&&typeof w.NEXORA_API_BASE==='string'&&w.NEXORA_API_BASE.trim())
+      return w.NEXORA_API_BASE.trim().replace(/\/$/,'');
+    const m=document.querySelector('meta[name="nexora-api-base"]');
+    if(m){const c=(m.getAttribute('content')||'').trim();if(c)return c.replace(/\/$/,'');}
+    const h=String(location.hostname||'').toLowerCase();
+    if(h==='nexora-investment.com')
+      return `${location.protocol}//www.nexora-investment.com`.replace(/\/$/,'');
+    return '';
+  }catch(_){return '';}
+}
+function nexoraApiUrl(path){
+  const o=_nexoraApiOrigin();
+  const p='/api'+path;
+  if(o)return o.replace(/\/$/,'')+p;
+  return p;
+}
 async function api(path,method='GET',body=null){
-  const url='/api'+path;
+  const url=nexoraApiUrl(path);
+  _lastApiAttemptUrl=url;
   try{
     const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):null});
     const ct=(r.headers.get('content-type')||'').toLowerCase();
@@ -1199,7 +1220,10 @@ async function doLogin(){
   const btn=document.getElementById('lBtn');btn.disabled=true;btn.textContent='⏳ جارٍ الاتصال...';
   const d=await api('/login','POST',{email,password:pw,token:s.token});
   btn.disabled=false;btn.textContent='تسجيل الدخول';
-  if(!d)return toast('تعذر الاتصال بالخادم — المتصفح لم يصل إلى /api (تحقق من العنوان: localhost هنا = جهازك وليس السيرفر)','er');
+  if(!d){
+    const u=_lastApiAttemptUrl||nexoraApiUrl('/login');
+    return toast('تعذر الاتصال بالخادم. تأكد أن البوت والنفق يعملان وأن الطلب يصل إلى: '+u,'er');
+  }
   if(d.needs_pin){
     document.getElementById('loginBox').style.display='none';
     document.getElementById('pinBox').style.display='block';
@@ -1510,7 +1534,7 @@ const _AR_TO_EN_RAW={
   'خطأ':'Error',
   'بريد غير صحيح':'Invalid email',
   'كلمة مرور قصيرة':'Password too short',
-  'تعذر الاتصال بالخادم — المتصفح لم يصل إلى /api (تحقق من العنوان: localhost هنا = جهازك وليس السيرفر)':'Cannot reach server - browser did not reach /api (localhost here means your device, not server)',
+  'تعذر الاتصال بالخادم. تأكد أن البوت والنفق يعملان وأن الطلب يصل إلى: ':'Could not reach the server. Ensure the bot and tunnel are running; request URL: ',
   'أدخل رمز PIN من البريد أو تطبيق Quotex':'Enter PIN from email or Quotex app',
   'فشل':'Failed',
   'أدخل PIN كامل':'Enter full PIN',
